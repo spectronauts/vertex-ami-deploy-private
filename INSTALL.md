@@ -53,27 +53,11 @@ The scripts in this directory automate the AWS side; each step names the script 
 
 ## Architecture
 
-The diagram is also in [`architecture.excalidraw`](architecture.excalidraw): open it at
-[excalidraw.com](https://excalidraw.com) (menu, Open) or in the VS Code Excalidraw extension.
+![Architecture: your workstation reaches the private subnet through an EC2 Instance Connect Endpoint or SSM; an internal NLB on the VIP 10.0.11.210 fronts three appliance nodes, which also talk directly to each other](architecture.svg)
 
-```
-                         Your workstation
-                               |
-                AWS API: EICE open-tunnel, or SSM start-session
-                               |
-+----------------------- VPC 10.0.0.0/16 (one AZ, no IGW, no NAT) -----------------------+
-|  Private subnet 10.0.11.0/24 (route table: local only)                                 |
-|                                                                                        |
-|   [ EICE endpoint ]   or   [ SSM endpoints x3 ] + [ jump host, no inbound ports ]      |
-|            |                                   |                                       |
-|            +--------- all ports --------------+------------------------+              |
-|                                                                        v              |
-|   [ Internal NLB, private IP = VIP 10.0.11.210 ]  <-- 443/6443/30003/5080 -->  [ node 1 ]
-|                                                                                [ node 2 ]
-|                                                                                [ node 3 ]
-|                              nodes also talk directly to each other (all traffic)     |
-+----------------------------------------------------------------------------------------+
-```
+To change the diagram, open [`architecture.excalidraw`](architecture.excalidraw) at
+[excalidraw.com](https://excalidraw.com) (menu, Open) or in the VS Code Excalidraw extension,
+then export it as SVG over `architecture.svg`.
 
 The NLB's private IP is the cluster VIP. The access path reaches the nodes and the NLB; the
 nodes reach each other and the NLB, and nothing outside the VPC.
