@@ -67,12 +67,6 @@ aws ssm start-session --target <jump-host-id> --document-name AWS-StartPortForwa
   --parameters '{"host":["<node-ip>"],"portNumber":["5080"],"localPortNumber":["5080"]}'
 ```
 
-Node status check stays "impaired" after its reset:
-
-```bash
-aws ec2 reboot-instances --instance-ids <node-instance-id>
-```
-
 ## 6-7. Link the nodes, create the cluster, then the NLB
 
 In Local UI, link nodes 2 and 3 to node 1, then create the cluster with VIP = `NLB_PRIVATE_IP`
@@ -132,6 +126,12 @@ kubectl --kubeconfig <file> config set-cluster kubernetes \
 ```
 
 ## Troubleshooting
+
+Node status check stays "impaired" after its reset:
+
+```bash
+aws ec2 reboot-instances --instance-ids <node-instance-id>
+```
 
 `mongo-0` stuck in `Init:0/1` with "mongo.key is empty":
 
