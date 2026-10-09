@@ -1,5 +1,4 @@
-# ami-deploy-private: the VerteX appliance with no public subnets
-
+# Deploy the VerteX Appliance in an Airgapped environment
 Deploys the appliance into networks that allow **no public subnets**: no internet gateway,
 no NAT gateway, no public IPs, no route to the internet anywhere in the VPC. There is no
 bastion; you reach the nodes through AWS's own services, picked per deployment with
