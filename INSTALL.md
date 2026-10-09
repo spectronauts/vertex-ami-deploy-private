@@ -12,6 +12,7 @@ minutes after Deploy Cluster. The SSM path is built by the same scripts but not 
 end to end.
 
 The scripts in this directory automate the AWS side; each step names the script that does it.
+For just the commands, see [INSTALLCMDS.md](INSTALLCMDS.md).
 
 ---
 
