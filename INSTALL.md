@@ -45,8 +45,7 @@ The scripts in this directory automate the AWS side; each step names the script 
 - **Within a minute, create the internal NLB on the VIP** with TCP listeners on 443, 6443,
   30003 and 5080, target groups with **client IP preservation off** (`./deploy.sh`).
 - **Watch it come up:** 6443, then 30003, then 443 turn healthy on all nodes. If `mongo-0`
-  sticks in `Init` with "mongo.key is empty", set the key. If a pod on one node can't pull an
-  image from `us-docker.pkg.dev`, copy the images that node lost (both in Troubleshooting).
+  sticks in `Init` with "mongo.key is empty", set the key (Troubleshooting).
 - **Validate.**
 
 ---
@@ -365,7 +364,7 @@ clusters:
 | `dial tcp <VIP>:6443: no route to host` | NLB not created yet | `./deploy.sh` |
 | Node connections to the VIP hang | Client IP preservation on | `preserve_client_ip.enabled=false` on the target groups |
 | `mongo-0` stuck in `Init:0/1`, "mongo.key is empty"; configserver crash-looping | Helm re-applies the MongoDB key secret empty during install | Set the key (below) |
-| A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume too small); the node can't pull them back | Copy them from a healthy node (below); use at least 300 GB next time |
+| A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume too small); the node can't pull them back | Redeploy with root volumes of at least 300 GB (Step 4) |
 
 **Set the MongoDB key:**
 
@@ -373,36 +372,6 @@ clusters:
 kubectl -n hubble-system patch secret spectro-mongodb-replicaset-key --type merge \
   -p "{\"stringData\":{\"mongo.key\":\"$(openssl rand -base64 756 | tr -d '\n')\"}}"
 ```
-
-**Copy images a node lost.** Confirm on the affected node with `sudo journalctl -u kubelet |
-grep "Removing image to free bytes"`. List the preloaded images a healthy node has and the
-affected one doesn't (node names from `kubectl get nodes`), then stream each one from the
-healthy node straight to the affected one over the private subnet, pinning it so kubelet
-can't delete it again. Instance IDs and IPs come from `./connect.sh nodes`; `-A` forwards
-your ssh-agent (`ssh-add <key>` first), so the healthy node can reach the other without a
-copy of the key:
-
-```
-img() { kubectl get node "$1" -o jsonpath='{range .status.images[*]}{.names[*]}{"\n"}{end}' \
-  | tr ' ' '\n' | grep -v -e '@sha256' -e ':30003/' | sort -u; }
-comm -23 <(img <healthy-node-name>) <(img <affected-node-name>) > images-missing.txt
-
-for i in $(cat images-missing.txt); do
-  ssh -A -i <key> -o ProxyCommand="aws ec2-instance-connect open-tunnel --region <region> --instance-id %h" \
-    kairos@<healthy-instance-id> "sudo /opt/bin/ctr -n k8s.io images export --platform linux/amd64 - $i \
-    | ssh -o StrictHostKeyChecking=accept-new kairos@<affected-node-ip> \
-      'sudo /opt/bin/ctr -n k8s.io images import --platform linux/amd64 - \
-       && sudo /opt/bin/ctr -n k8s.io images label $i io.cri-containerd.pinned=pinned'"
-done
-```
-
-`ctr` is in `/opt/bin`, which isn't on sudo's PATH.
-
-Images on the local registry (`<VIP>:30003/...`) are left out because nodes pull those again on
-demand. `drbd9-almalinux*` can be removed from the list on Ubuntu hosts. A stuck pod retries its
-pull at least every 5 minutes; delete it to retry right away. Don't relay images through the
-EICE tunnel from your workstation (`ssh node | ssh node`): it is slow and can cut off the end
-of a large image.
 
 ---
 
