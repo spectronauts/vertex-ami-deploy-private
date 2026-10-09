@@ -78,13 +78,24 @@ nodes reach each other and the NLB, and nothing outside the VPC.
 
 ## Before you start
 
-- **AWS CLI v2** with credentials allowed to manage EC2, Elastic Load Balancing v2, VPC and,
-  for SSM, IAM roles and instance profiles. EICE needs AWS CLI 2.12 or later.
+- **A workstation running macOS or Linux, on x86_64 or arm64**, with bash 3.2 or later. Each
+  script checks for the tools it needs before doing anything and, if one is missing, prints
+  the install command for your OS and CPU (Homebrew on macOS; the AWS installers, `apt` or
+  `dnf` on Linux):
+
+  | Tool | Needed by |
+  | --- | --- |
+  | AWS CLI v2 (2.12 or later for EICE's `open-tunnel`) | Every script |
+  | OpenSSH client: `ssh`, `ssh-agent`, `ssh-add`, `ssh-keygen` | EICE access: `connect.sh`, `copy-images.sh` |
+  | Session Manager plugin | `ACCESS_METHOD=ssm`: `connect.sh` |
+  | `kubectl` | `./connect.sh kubeconfig`, and kubectl access to the cluster |
+
+- **AWS credentials** allowed to manage EC2, Elastic Load Balancing v2, VPC and, for SSM, IAM
+  roles and instance profiles. The scripts confirm them with `sts get-caller-identity` first.
 - **The AMI** shared into the region (us-gov-west-1: `ami-0801ea0ff68e48cc6`, copied nightly
   from us-east-1).
 - **An EC2 key pair** and its private key on your workstation. The AMI installs this key for
   the `kairos` user, so SSH works with it; `kairos` has no usable password.
-- **For SSM:** the Session Manager plugin (`brew install --cask session-manager-plugin`).
 - **A Local UI user and password** for the user data, and an **OCI Pack Registry password**
   for cluster creation.
 
@@ -383,7 +394,7 @@ kubectl -n hubble-system patch secret spectro-mongodb-replicaset-key --type merg
 grep "Removing image to free bytes"`. List the preloaded images a healthy node has and the
 affected one doesn't (node names from `kubectl get nodes`), then copy them node to node.
 `copy-images.sh` takes node numbers from `./connect.sh nodes`, streams each image straight to
-the target over the private subnet with your key forwarded from your Mac's ssh-agent, and
+the target over the private subnet with your key forwarded from your workstation's ssh-agent, and
 pins it so kubelet can't delete it again:
 
 ```

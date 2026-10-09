@@ -33,6 +33,19 @@ cd "$(dirname "$0")"
 source ./lib.sh
 
 # ---------------------------------------------------------------------------
+ip_to_int() {  # dotted IPv4 -> integer, or fail if malformed
+  local IFS=. o n=0
+  [[ "$1" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+  for o in $1; do o=$((10#$o)); [[ $o -le 255 ]] || return 1; n=$((n * 256 + o)); done
+  echo "$n"
+}
+usable_ip() {  # ip cidr -> 0 if ip is a host address AWS lets you assign (it reserves the first four and the last)
+  local ip net bits size
+  ip=$(ip_to_int "$1") && net=$(ip_to_int "${2%/*}") || return 1
+  bits=${2#*/}; size=$((1 << (32 - bits)))
+  [[ $ip -ge $((net + 4)) && $ip -lt $((net + size - 1)) ]]
+}
+
 preflight() {
   log "Preflight checks"
   local v
@@ -40,9 +53,8 @@ preflight() {
     [[ -n "${!v:-}" ]] || die "$v is required in $CONFIG."
   done
   [[ "$ACCESS_METHOD" == "eice" || "$ACCESS_METHOD" == "ssm" ]] || die "ACCESS_METHOD must be eice or ssm."
-  CALLER_ARN=$(aws_q sts get-caller-identity --query Arn) || die "AWS credentials are not valid for $REGION."
-  PARTITION=$(echo "$CALLER_ARN" | cut -d: -f2)
-  ok "Authenticated as $CALLER_ARN"
+  require_aws
+  ok "Authenticated as $CALLER_ARN ($OS $ARCH)"
 
   [[ "$(aws_q ec2 describe-images --image-ids "$AMI_ID" --query 'Images[0].State')" == "available" ]] \
     || die "AMI $AMI_ID is not available in $REGION."
@@ -84,8 +96,7 @@ preflight() {
       --query 'InternetGateways[0].InternetGatewayId')")" ]] || die "$VPC_ID has an internet gateway; this deployment allows none."
   ok "VPC $VPC_ID, private subnet $PRIVATE_ID in $AZ; no internet gateway, no default route"
 
-  python3 -c 'import ipaddress as i,sys; n=i.ip_network(sys.argv[2]); a=i.ip_address(sys.argv[1]); sys.exit(0 if a in n and a not in list(n.hosts())[:3] and a != n.broadcast_address else 1)' \
-      "$NLB_PRIVATE_IP" "$PRIVATE_CIDR" || die "NLB_PRIVATE_IP $NLB_PRIVATE_IP is not a usable address in $PRIVATE_CIDR."
+  usable_ip "$NLB_PRIVATE_IP" "$PRIVATE_CIDR" || die "NLB_PRIVATE_IP $NLB_PRIVATE_IP is not a usable address in $PRIVATE_CIDR."
   local arn current
   arn=$(nlb_arn); current=""
   [[ -n "$arn" ]] && current=$(nlb_private_ip "$arn")
@@ -101,7 +112,7 @@ preflight() {
 
   if [[ "$ACCESS_METHOD" == "ssm" ]]; then
     command -v session-manager-plugin >/dev/null \
-      || warn "session-manager-plugin not found; ./connect.sh needs it (macOS: brew install --cask session-manager-plugin)."
+      || warn "session-manager-plugin not found; ./connect.sh needs it. Install: $(install_hint session-manager-plugin)"
   fi
   ok "Access method: $ACCESS_METHOD"
 }
@@ -364,7 +375,7 @@ summary() {
   VIP for Cluster Config: $NLB_PRIVATE_IP   (the NLB's private IP)
   NLB:                    $NLB_DNS
 
-  Local UI in about 25-30 minutes. From your Mac:
+  Local UI in about 25-30 minutes. From your workstation:
     ./connect.sh localui        forwards every node's 5080 (node 1 -> https://localhost:5080)
     ./connect.sh ssh 1          shell on node 1
     ./connect.sh api            forwards the VIP's 6443 for kubectl

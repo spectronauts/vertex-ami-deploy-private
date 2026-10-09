@@ -28,6 +28,8 @@ pick_az() {
 }
 
 log "Private network ($REGION)"
+require_aws
+ok "Authenticated as $CALLER_ARN ($OS $ARCH)"
 
 VPC_ID=$(vpc_id)
 if [[ -z "$VPC_ID" ]]; then

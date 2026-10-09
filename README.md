@@ -14,7 +14,7 @@ Deploy Cluster.
 | What gets built | One EC2 Instance Connect Endpoint in the subnet | ssm, ssmmessages and ec2messages interface endpoints, an IAM role, a t3.micro Amazon Linux jump host (no inbound ports) |
 | Hourly cost | None | Three endpoints plus the jump host |
 | How you get in | SSH (port 22) through the endpoint; Local UI and the API ride `ssh -L` through node 1 | `aws ssm start-session` port forwarding to any node port |
-| Needs on your Mac | AWS CLI v2, your EC2 private key (`SSH_KEY_FILE`) | AWS CLI v2, `session-manager-plugin`; the key only for `ssh` |
+| Needs on your workstation | AWS CLI v2.12+, OpenSSH, your EC2 private key (`SSH_KEY_FILE`) | AWS CLI v2, `session-manager-plugin`; the key only for `ssh` |
 
 `./connect.sh` hides the difference: the same commands work for both.
 
@@ -27,12 +27,16 @@ Deploy Cluster.
 | `user-data.yaml.example` | The airgap guide's user data (`fusion` user); copy to `user-data.yaml`, set password and key |
 | `create-vpc.sh` | VPC and one private subnet; refuses any internet gateway or default route |
 | `deploy.sh` | Security groups, the access path, the nodes, and (without `--no-nlb`) the NLB on the VIP |
-| `connect.sh` | `localui`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your Mac |
+| `connect.sh` | `localui`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
 | `status.sh` | Instances, access path, NLB and target health |
 | `copy-images.sh` | Copies preloaded images node to node and pins them, for a node whose images kubelet garbage-collected |
 | `teardown.sh` | Deletes everything, VPC and IAM role included; `--nlb-only` deletes just the NLB |
 
 ## Run
+
+Works from macOS or Linux, on x86_64 or arm64. Each script checks for the tools and AWS
+credentials it needs first, and prints the install command for your platform if something is
+missing (INSTALL.md, "Before you start").
 
 ```bash
 cp config.env.example config.env               # AMI_ID, KEY_NAME, SSH_KEY_FILE, ACCESS_METHOD

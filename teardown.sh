@@ -18,6 +18,7 @@ done
 cd "$(dirname "$0")"
 # shellcheck source=lib.sh
 source ./lib.sh
+require_aws
 
 retry() {  # tries what command...  (network interfaces take a while to release)
   local tries=$1 what=$2 i; shift 2

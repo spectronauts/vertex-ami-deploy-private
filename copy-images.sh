@@ -10,7 +10,7 @@
 # kubelet garbage-collects one (disk over 85%), an airgapped node can't pull it back.
 #
 # How: ssh -A forwards your ssh-agent to <from-node>, which streams each image straight to
-# <to-node>'s private IP. Your key stays on your Mac, and the data never crosses the EICE
+# <to-node>'s private IP. Your key stays on your workstation, and the data never crosses the EICE
 # tunnel (too slow, and it can drop the end of a long stream). Images already on <to-node>
 # are only pinned. Needs ACCESS_METHOD=eice and node-to-node traffic (NODE_TO_NODE=true).
 
@@ -35,6 +35,8 @@ fi
 
 [[ "$ACCESS_METHOD" == "eice" ]] || die "copy-images.sh supports ACCESS_METHOD=eice only."
 [[ -n "$SSH_KEY_FILE" && -f "$SSH_KEY_FILE" ]] || die "Set SSH_KEY_FILE in $CONFIG to the private key for $KEY_NAME."
+require_aws
+require_agent   # agent forwarding needs the key loaded in your workstation's ssh-agent
 
 # shellcheck disable=SC2207
 IDS=($(node_ids)); IPS=($(node_ips))
@@ -42,10 +44,6 @@ for n in "$FROM" "$TO"; do
   [[ "$n" =~ ^[0-9]+$ && $n -ge 1 && $n -le ${#IDS[@]} ]] || die "Node must be 1-${#IDS[@]}."
 done
 [[ "$FROM" != "$TO" ]] || die "From and to are the same node."
-
-# Agent forwarding needs the key loaded in your Mac's ssh-agent.
-fp=$(ssh-keygen -lf "$SSH_KEY_FILE" 2>/dev/null | awk '{print $2}') || fp=""
-[[ -n "$fp" ]] && ssh-add -l 2>/dev/null | grep -qF "$fp" || ssh-add "$SSH_KEY_FILE"
 
 log "Copying ${#IMAGES[@]} image(s) from node $FROM (${IPS[$((FROM - 1))]}) to node $TO (${IPS[$((TO - 1))]})"
 # The remote script is wrapped in a function so bash reads all of it before the inner ssh

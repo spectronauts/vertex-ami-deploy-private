@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reach the private nodes from your Mac through the deployment's ACCESS_METHOD.
+# Reach the private nodes from your workstation through the deployment's ACCESS_METHOD.
 #
 # Usage: ./connect.sh [-c config.env] <command>
 #   localui      forward every node's Local UI: node N -> https://localhost:<5079+N>
@@ -21,12 +21,17 @@ CMD="${1:-}"; ARG="${2:-1}"
 cd "$(dirname "$0")"
 # shellcheck source=lib.sh
 source ./lib.sh
+case "$CMD" in
+  nodes|localui|ssh|api|kubeconfig) require_aws ;;
+  *) sed -n '2,17p' "$0"; exit 2 ;;
+esac
 
 # shellcheck disable=SC2207
 IDS=($(node_ids)); IPS=($(node_ips))
 [[ ${#IDS[@]} -gt 0 ]] || die "No running nodes for $NAME_PREFIX."
 
 need_key() {
+  require_tools ssh
   [[ -n "$SSH_KEY_FILE" && -f "$SSH_KEY_FILE" ]] || die "Set SSH_KEY_FILE in $CONFIG to the private key for $KEY_NAME."
 }
 eice_ssh() {  # extra ssh options... -> ssh to node 1 through the endpoint
@@ -36,13 +41,14 @@ eice_ssh() {  # extra ssh options... -> ssh to node 1 through the endpoint
 }
 ssm_forward() {  # remote-host remote-port local-port  (runs in the background)
   local jump
+  require_tools session-manager-plugin
   jump=$(instance_id jump); [[ -n "$jump" ]] || die "No jump host for $NAME_PREFIX (ACCESS_METHOD=ssm)."
   aws ssm start-session --target "$jump" --document-name AWS-StartPortForwardingSessionToRemoteHost \
       --parameters "{\"host\":[\"$1\"],\"portNumber\":[\"$2\"],\"localPortNumber\":[\"$3\"]}" >/dev/null &
 }
 wait_port() {  # local-port: wait until something listens on it
   local i
-  for i in $(seq 1 30); do nc -z localhost "$1" 2>/dev/null && return 0; sleep 1; done
+  for i in $(seq 1 30); do port_open localhost "$1" && return 0; sleep 1; done
   die "Nothing listening on localhost:$1 after 30 seconds."
 }
 
@@ -90,6 +96,7 @@ case "$CMD" in
     # Copy node 1's admin kubeconfig and point it at the ./connect.sh api forward. The API
     # certificate lists "kubernetes" and the VIP but not localhost, hence tls-server-name.
     out="${2:-kubeconfig-$NAME_PREFIX}"
+    require_tools kubectl
     umask 077
     if [[ "$ACCESS_METHOD" == "eice" ]]; then
       eice_ssh "$SSH_USER@${IDS[0]}" 'sudo cat /etc/kubernetes/admin.conf' > "$out"

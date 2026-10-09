@@ -8,6 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 # shellcheck source=lib.sh
 source ./lib.sh
+require_aws
 
 log "Instances"
 aws ec2 describe-instances --filters "Name=tag:$TAG_KEY,Values=$NAME_PREFIX" \

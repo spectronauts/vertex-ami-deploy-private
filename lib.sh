@@ -20,6 +20,7 @@ source "$CONFIG"
 : "${ACCESS_METHOD:=eice}" "${JUMP_INSTANCE_TYPE:=t3.micro}" "${SSH_USER:=kairos}" "${SSH_KEY_FILE:=}"
 : "${JUMP_AMI_SSM_PARAM:=/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}"
 
+[[ -n "${REGION:-}" ]] || die "REGION is required in $CONFIG (for example us-gov-west-1)."
 export AWS_DEFAULT_REGION="$REGION"
 export AWS_PAGER=""   # print AWS CLI output to the terminal instead of a pager (less)
 TAG_KEY="vxp:deployment"
@@ -29,6 +30,77 @@ SSM_SERVICES="ssm ssmmessages ec2messages"
 
 aws_q() { aws "$@" --output text 2>/dev/null; }
 none_to_empty() { [[ "$1" == "None" ]] && echo "" || echo "$1"; }
+
+# --- Workstation prerequisites: macOS or Linux, x86_64 or arm64 -----------------------------
+OS=$(uname -s); ARCH=$(uname -m)
+
+install_hint() {  # tool -> how to install it on this OS and CPU
+  local aws_arch=x86_64 k8s_arch=amd64 ssm_arch=64bit
+  local ssm_url=https://s3.amazonaws.com/session-manager-downloads/plugin/latest
+  case "$ARCH" in
+    x86_64|amd64) ;;
+    arm64|aarch64) aws_arch=aarch64; k8s_arch=arm64; ssm_arch=arm64 ;;
+    *) case "$1" in aws|session-manager-plugin|kubectl) echo "no $1 build for $ARCH; use an x86_64 or arm64 machine"; return ;; esac ;;
+  esac
+  if [[ "$OS" == "Darwin" ]]; then
+    case "$1" in
+      aws) echo "brew install awscli  (or https://awscli.amazonaws.com/AWSCLIV2.pkg)" ;;
+      session-manager-plugin) echo "brew install --cask session-manager-plugin" ;;
+      kubectl) echo "brew install kubectl" ;;
+      ssh|ssh-add|ssh-agent|ssh-keygen) echo "it ships with macOS; check your PATH" ;;
+      *) echo "brew install $1" ;;
+    esac
+    return
+  fi
+  case "$1" in
+    aws) echo "curl -fsSLo awscliv2.zip https://awscli.amazonaws.com/awscli-exe-linux-$aws_arch.zip && unzip -q awscliv2.zip && sudo ./aws/install --update" ;;
+    session-manager-plugin)
+      if command -v dpkg >/dev/null 2>&1; then
+        echo "curl -fsSLO $ssm_url/ubuntu_$ssm_arch/session-manager-plugin.deb && sudo dpkg -i session-manager-plugin.deb"
+      else
+        echo "sudo dnf install -y $ssm_url/linux_$ssm_arch/session-manager-plugin.rpm  (yum on older releases)"
+      fi ;;
+    kubectl) echo "curl -fsSLO https://dl.k8s.io/release/\$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/$k8s_arch/kubectl && sudo install kubectl /usr/local/bin/" ;;
+    ssh|ssh-add|ssh-agent|ssh-keygen)
+      if command -v apt-get >/dev/null 2>&1; then echo "sudo apt-get install -y openssh-client"
+      else echo "sudo dnf install -y openssh-clients"; fi ;;
+    *) echo "install $1 with your package manager" ;;
+  esac
+}
+
+require_tools() {  # tool... -> stop, with an install command per tool, if any is missing
+  local t missing=""
+  for t in "$@"; do
+    command -v "$t" >/dev/null 2>&1 || { warn "$t not found. Install: $(install_hint "$t")"; missing=1; }
+  done
+  [[ -z "$missing" ]] || die "Install the missing tools above ($OS $ARCH), then re-run."
+}
+
+require_aws() {  # AWS CLI v2 (2.12+ for EICE's open-tunnel) and working credentials; sets CALLER_ARN, PARTITION
+  require_tools aws
+  local v minor
+  v=$(aws --version 2>&1 | awk '{print $1}')
+  [[ "$v" == aws-cli/2.* ]] || die "AWS CLI v2 is required; found ${v:-nothing}. Install: $(install_hint aws)"
+  minor=$(echo "$v" | cut -d/ -f2 | cut -d. -f2)
+  [[ "$ACCESS_METHOD" != "eice" || "$minor" -ge 12 ]] \
+    || die "ACCESS_METHOD=eice needs AWS CLI 2.12 or later for open-tunnel; found ${v#aws-cli/}. Update: $(install_hint aws)"
+  CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text 2>&1) \
+    || die "AWS credentials don't work in $REGION: $(echo "$CALLER_ARN" | tail -1)"
+  PARTITION=$(echo "$CALLER_ARN" | cut -d: -f2)
+}
+
+require_agent() {  # ssh-agent running, with SSH_KEY_FILE loaded (adds it if missing)
+  require_tools ssh ssh-add ssh-keygen
+  local rc=0 fp
+  ssh-add -l >/dev/null 2>&1 || rc=$?
+  [[ $rc -ne 2 ]] || die "No ssh-agent is running. Start one in this shell: eval \"\$(ssh-agent -s)\""
+  fp=$(ssh-keygen -lf "$SSH_KEY_FILE" 2>/dev/null | awk '{print $2}') || fp=""
+  [[ -n "$fp" ]] && ssh-add -l 2>/dev/null | grep -qF "$fp" || ssh-add "$SSH_KEY_FILE"
+}
+
+port_open() {  # host port -> 0 if something accepts TCP connections there (bash /dev/tcp; no nc needed)
+  (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null
+}
 
 tags() {  # resource-type name -> a --tag-specifications value
   echo "ResourceType=$1,Tags=[{Key=Name,Value=$2},{Key=$TAG_KEY,Value=$NAME_PREFIX}]"
