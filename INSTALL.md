@@ -86,7 +86,7 @@ nodes reach each other and the NLB, and nothing outside the VPC.
   | Tool | Needed by |
   | --- | --- |
   | AWS CLI v2 (2.12 or later for EICE's `open-tunnel`) | Every script |
-  | OpenSSH client: `ssh`, `ssh-agent`, `ssh-add`, `ssh-keygen` | EICE access: `connect.sh`, `copy-images.sh` |
+  | OpenSSH client (`ssh`) | EICE access: `connect.sh` |
   | Session Manager plugin | `ACCESS_METHOD=ssm`: `connect.sh` |
   | `kubectl` | `./connect.sh kubeconfig`, and kubectl access to the cluster |
 
@@ -392,17 +392,27 @@ kubectl -n hubble-system patch secret spectro-mongodb-replicaset-key --type merg
 
 **Copy images a node lost.** Confirm on the affected node with `sudo journalctl -u kubelet |
 grep "Removing image to free bytes"`. List the preloaded images a healthy node has and the
-affected one doesn't (node names from `kubectl get nodes`), then copy them node to node.
-`copy-images.sh` takes node numbers from `./connect.sh nodes`, streams each image straight to
-the target over the private subnet with your key forwarded from your workstation's ssh-agent, and
-pins it so kubelet can't delete it again:
+affected one doesn't (node names from `kubectl get nodes`), then stream each one from the
+healthy node straight to the affected one over the private subnet, pinning it so kubelet
+can't delete it again. Instance IDs and IPs come from `./connect.sh nodes`; `-A` forwards
+your ssh-agent (`ssh-add <key>` first), so the healthy node can reach the other without a
+copy of the key:
 
 ```
 img() { kubectl get node "$1" -o jsonpath='{range .status.images[*]}{.names[*]}{"\n"}{end}' \
   | tr ' ' '\n' | grep -v -e '@sha256' -e ':30003/' | sort -u; }
 comm -23 <(img <healthy-node-name>) <(img <affected-node-name>) > images-missing.txt
-./copy-images.sh <healthy-node-number> <affected-node-number> -f images-missing.txt
+
+for i in $(cat images-missing.txt); do
+  ssh -A -i <key> -o ProxyCommand="aws ec2-instance-connect open-tunnel --region <region> --instance-id %h" \
+    kairos@<healthy-instance-id> "sudo /opt/bin/ctr -n k8s.io images export --platform linux/amd64 - $i \
+    | ssh -o StrictHostKeyChecking=accept-new kairos@<affected-node-ip> \
+      'sudo /opt/bin/ctr -n k8s.io images import --platform linux/amd64 - \
+       && sudo /opt/bin/ctr -n k8s.io images label $i io.cri-containerd.pinned=pinned'"
+done
 ```
+
+`ctr` is in `/opt/bin`, which isn't on sudo's PATH.
 
 Images on the local registry (`<VIP>:30003/...`) are left out because nodes pull those again on
 demand. `drbd9-almalinux*` can be removed from the list on Ubuntu hosts. A stuck pod retries its

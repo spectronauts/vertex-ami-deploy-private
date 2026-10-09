@@ -9,7 +9,7 @@ kubeconfig-*
 # Written by deploy.sh: this deployment's resource IDs.
 outputs-*.txt
 
-# Image lists for copy-images.sh, specific to one deployment.
+# Image lists for copying images between nodes, specific to one deployment.
 images-*.txt
 
 # Working drafts, not part of the tooling.

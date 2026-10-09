@@ -89,15 +89,6 @@ require_aws() {  # AWS CLI v2 (2.12+ for EICE's open-tunnel) and working credent
   PARTITION=$(echo "$CALLER_ARN" | cut -d: -f2)
 }
 
-require_agent() {  # ssh-agent running, with SSH_KEY_FILE loaded (adds it if missing)
-  require_tools ssh ssh-add ssh-keygen
-  local rc=0 fp
-  ssh-add -l >/dev/null 2>&1 || rc=$?
-  [[ $rc -ne 2 ]] || die "No ssh-agent is running. Start one in this shell: eval \"\$(ssh-agent -s)\""
-  fp=$(ssh-keygen -lf "$SSH_KEY_FILE" 2>/dev/null | awk '{print $2}') || fp=""
-  [[ -n "$fp" ]] && ssh-add -l 2>/dev/null | grep -qF "$fp" || ssh-add "$SSH_KEY_FILE"
-}
-
 port_open() {  # host port -> 0 if something accepts TCP connections there (bash /dev/tcp; no nc needed)
   (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null
 }

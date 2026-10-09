@@ -29,7 +29,6 @@ Deploy Cluster.
 | `deploy.sh` | Security groups, the access path, the nodes, and (without `--no-nlb`) the NLB on the VIP |
 | `connect.sh` | `localui`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
 | `status.sh` | Instances, access path, NLB and target health |
-| `copy-images.sh` | Copies preloaded images node to node and pins them, for a node whose images kubelet garbage-collected |
 | `teardown.sh` | Deletes everything, VPC and IAM role included; `--nlb-only` deletes just the NLB |
 
 ## Run
