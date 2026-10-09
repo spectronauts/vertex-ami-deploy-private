@@ -39,8 +39,9 @@ The scripts in this directory automate the AWS side; each step names the script 
   node 3 at `https://[::1]:5082`.
 - **Link the nodes:** node 1 generates a token; nodes 2 and 3 link to it. Wait for Ready and
   Synced/Healthy.
-- **Create the cluster:** embedded config, OCI Pack Registry password, **VIP = the IP you
-  chose**, all three nodes in control-plane-pool, **Deploy Cluster**.
+- **Create the cluster:** embedded config, OCI Pack Registry password, your **Ubuntu Pro
+  token** (Profile Config; enter it now, not after deployment), **VIP = the IP you chose**,
+  all three nodes in control-plane-pool, **Deploy Cluster**.
 - **Within a minute, create the internal NLB on the VIP** with TCP listeners on 443, 6443,
   30003 and 5080, target groups with **client IP preservation off** (`./deploy.sh`).
 - **Watch it come up:** 6443, then 30003, then 443 turn healthy on all nodes. If `mongo-0`
@@ -98,8 +99,8 @@ nodes reach each other and the NLB, and nothing outside the VPC.
 - **The AMI** shared into the region (us-gov-west-1: `ami-0801ea0ff68e48cc6`).
 - **An EC2 key pair** and its private key on your workstation. The AMI installs this key for
   the `kairos` user, so SSH works with it; `kairos` has no usable password.
-- **A Local UI user and password** for the user data, and an **OCI Pack Registry password**
-  for cluster creation.
+- **A Local UI user and password** for the user data, an **OCI Pack Registry password** for
+  cluster creation, and your **Ubuntu Pro token** (VerteX is sold with one) for the same step.
 
 | Parameter | Value used | Notes |
 | --- | --- | --- |
@@ -205,23 +206,16 @@ Scripted: part of `./deploy.sh`, based on `ACCESS_METHOD`.
 | Instance metadata | "V1 and V2 (token optional)" |
 | User data | Below |
 
-**Why the root volume matters.** There are two separate limits.
+**Why at least 300 GB.**
 
-- **Under 40 GB, the node never leaves recovery.** The AMI ships with only its recovery
-  system. On first boot its `/oem/01_reset.yaml` adds a 19,780 MiB `COS_STATE` partition and
-  resets into the active system. The default 20 GB root has about 112 MB free after the
-  13.4 GB airgap content partition, so the reset fails ("state partition not found"), the
-  node stays in Kairos recovery, and any reboot hangs in GRUB.
-- **Too small a root, and kubelet can delete images the cluster can't get back.**
-  Kubernetes' filesystem is the `COS_PERSISTENT` partition, which takes whatever the other
-  partitions leave: 59.8 GiB on a 100 GB root. During install on 100 GB roots, node 1 (the
-  leader) passed kubelet's 85% garbage-collection threshold, and kubelet deleted unused
-  images to free space. Those included images the appliance preloads on every node and never
-  serves from the local registry: mongo, cert-manager, metrics-server, the palette agent,
-  `ubuntu-utils`, the piraeus CSI images and the upgrade images. With no internet, any pod
-  that later needs one on that node fails with `ImagePullBackOff` against
-  `us-docker.pkg.dev`. **Use at least 300 GB.** The partition is then about 246 GiB, and the
-  same install peaks around a fifth of it, leaving room for upgrades and logs.
+- **Under 40 GB the node never leaves recovery:** the first-boot reset has no room for its
+  19,780 MiB `COS_STATE` partition.
+- **Too small, and kubelet deletes images the node can't get back.** Kubernetes gets
+  whatever the root has left (59.8 GiB on 100 GB). On 100 GB roots the leader passed
+  kubelet's 85% cleanup threshold during install and deleted preloaded images (mongo,
+  cert-manager and others) that the local registry doesn't serve; pods that later need them
+  fail with `ImagePullBackOff`. At 300 GB that space is about 246 GiB, and the install uses
+  about a fifth of it.
 
 **User data** (your Local UI user; the AMI's `kairos` password is locked on every boot):
 
@@ -306,7 +300,14 @@ In Local UI on node 1:
 
 1. **Cluster > Create cluster**; the name cannot be changed later.
 2. **Cluster Profile:** Use embedded config.
-3. **Profile Config > Vertex Addon Profile:** OCI Pack Registry Password; leave the rest.
+3. **Profile Config:**
+   - **Vertex Addon Profile:** OCI Pack Registry Password.
+   - **Ubuntu Pro Token (Optional)**, with the cluster profile options (Pod CIDR, Service
+     CIDR, image pull secret): enter your token here, during cluster creation. Spectro's
+     docs call it optional but recommended for security and compliance; the FIPS kernel is
+     already in the image. Adding it after deployment, from the cluster's configuration tab,
+     repaves every node, and in one field report the repave never finished.
+   - Leave the rest at their defaults.
 4. **Cluster Config:** VIP = `10.0.11.210` (the free IP you chose).
 5. **Node Config:** control-plane-pool > **Add Item** > all three hosts.
 6. Review, **Deploy Cluster**.
