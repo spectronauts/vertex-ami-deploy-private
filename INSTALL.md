@@ -55,10 +55,6 @@ The scripts in this directory automate the AWS side; each step names the script 
 
 ![Architecture: your workstation reaches the private subnet through an EC2 Instance Connect Endpoint or SSM; an internal NLB on the VIP 10.0.11.210 fronts three appliance nodes, which also talk directly to each other](architecture.svg)
 
-To change the diagram, open [`architecture.excalidraw`](architecture.excalidraw) at
-[excalidraw.com](https://excalidraw.com) (menu, Open) or in the VS Code Excalidraw extension,
-then export it as SVG over `architecture.svg`.
-
 The NLB's private IP is the cluster VIP. The access path reaches the nodes and the NLB; the
 nodes reach each other and the NLB, and nothing outside the VPC.
 
