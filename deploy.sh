@@ -5,8 +5,8 @@
 #   access           ACCESS_METHOD=eice: an EC2 Instance Connect Endpoint in the subnet
 #                    ACCESS_METHOD=ssm:  ssm/ssmmessages/ec2messages endpoints, an IAM role,
 #                                        and a small Amazon Linux jump host (no inbound ports)
-#   nodes            APP_COUNT appliance instances (root volume ROOT_VOLUME_SIZE_GB, two
-#                    500 GB data volumes, user data)
+#   nodes            APP_COUNT appliance instances (root volume ROOT_VOLUME_SIZE_GB,
+#                    DATA_VOLUME_COUNT x DATA_VOLUME_SIZE_GB data volumes, user data)
 #   NLB              internal NLB on NLB_PRIVATE_IP (the VIP) with a TCP listener and target
 #                    group per app port
 # Safe to re-run: existing resources are reused.
@@ -61,17 +61,17 @@ preflight() {
   ROOT_DEVICE=$(aws_q ec2 describe-images --image-ids "$AMI_ID" --query 'Images[0].RootDeviceName')
   ok "AMI $AMI_ID available"
   # Two floors (INSTALL.md Step 4). Below about 40 GB the AMI's first-boot reset can't add its
-  # 19,780 MiB COS_STATE partition and the node stays in Kairos recovery. Below 200 GB the
+  # 19,780 MiB COS_STATE partition and the node stays in Kairos recovery. Below 300 GB the
   # COS_PERSISTENT partition (kubelet's filesystem: whatever the root has left, 59.8 GiB on
   # 100 GB) can pass kubelet's 85% image garbage-collection threshold during install; kubelet
   # then deletes preloaded images that an airgapped node can't pull back.
   [[ "$ROOT_VOLUME_SIZE_GB" =~ ^[0-9]+$ && $ROOT_VOLUME_SIZE_GB -ge 40 ]] \
     || die "ROOT_VOLUME_SIZE_GB must be at least 40; the AMI's first-boot reset cannot create COS_STATE below that."
-  if [[ $ROOT_VOLUME_SIZE_GB -lt 200 ]]; then
+  if [[ $ROOT_VOLUME_SIZE_GB -lt 300 ]]; then
     if [[ -n "$(node_ids)" ]]; then
-      warn "ROOT_VOLUME_SIZE_GB $ROOT_VOLUME_SIZE_GB is under 200; the existing nodes are kept as they are."
+      warn "ROOT_VOLUME_SIZE_GB $ROOT_VOLUME_SIZE_GB is under 300; the existing nodes are kept as they are."
     else
-      die "ROOT_VOLUME_SIZE_GB must be at least 200; below that kubelet can delete preloaded images during install."
+      die "ROOT_VOLUME_SIZE_GB must be at least 300; below that kubelet can delete preloaded images."
     fi
   fi
   ok "Root volume $ROOT_DEVICE: $ROOT_VOLUME_SIZE_GB GB"

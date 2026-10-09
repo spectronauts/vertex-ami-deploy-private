@@ -29,8 +29,8 @@ The scripts in this directory automate the AWS side; each step names the script 
     ports.
 - **Choose the VIP:** a free IP in the private subnet, for example 10.0.11.210.
   **Do not create the NLB yet.**
-- **Launch three nodes** from the AMI: m5.2xlarge, private subnet, app group, **200 GB gp3
-  root volume**, two 500 GB gp3 data volumes, metadata "V1 and V2 (token optional)", user data
+- **Launch three nodes** from the AMI: m5.2xlarge, private subnet, app group, **300 GB gp3
+  root volume**, one 500 GB gp3 data volume, metadata "V1 and V2 (token optional)", user data
   with your Local UI user.
 - **Wait 25-30 minutes.** Each node resets itself out of recovery mode (about 4-6 minutes), then
   Local UI starts.
@@ -92,8 +92,7 @@ nodes reach each other and the NLB, and nothing outside the VPC.
 
 - **AWS credentials** allowed to manage EC2, Elastic Load Balancing v2, VPC and, for SSM, IAM
   roles and instance profiles. The scripts confirm them with `sts get-caller-identity` first.
-- **The AMI** shared into the region (us-gov-west-1: `ami-0801ea0ff68e48cc6`, copied nightly
-  from us-east-1).
+- **The AMI** shared into the region (us-gov-west-1: `ami-0801ea0ff68e48cc6`).
 - **An EC2 key pair** and its private key on your workstation. The AMI installs this key for
   the `kairos` user, so SSH works with it; `kairos` has no usable password.
 - **A Local UI user and password** for the user data, and an **OCI Pack Registry password**
@@ -105,8 +104,8 @@ nodes reach each other and the NLB, and nothing outside the VPC.
 | VPC CIDR | 10.0.0.0/16 | |
 | Private subnet | 10.0.11.0/24 | Nodes, NLB and access endpoints |
 | Nodes | 3 x m5.2xlarge | 1 also works |
-| Root volume | 200 GB gp3 | **At least 200 GB** (Step 4) |
-| Data volumes | 2 x 500 GB gp3 | The AMI builds its storage pool on the first unused one |
+| Root volume | 300 GB gp3 | **At least 300 GB** (Step 4) |
+| Data volume | 1 x 500 GB gp3 | The AMI builds its storage pool (LINSTOR/DRBD) on it |
 | VIP | 10.0.11.210 | Free IP in the private subnet; becomes the NLB's IP |
 | Access | EICE or SSM | `ACCESS_METHOD` in `config.env` |
 
@@ -198,8 +197,8 @@ Scripted: part of `./deploy.sh`, based on `ACCESS_METHOD`.
 | AMI | The appliance AMI |
 | Instance type | m5.2xlarge |
 | Network | Private subnet, app group, no public IP |
-| Root volume | **200 GB gp3** (at least 200) |
-| Data volumes | 2 x 500 GB gp3 |
+| Root volume | **300 GB gp3** (at least 300) |
+| Data volume | 1 x 500 GB gp3 |
 | Instance metadata | "V1 and V2 (token optional)" |
 | User data | Below |
 
@@ -210,15 +209,16 @@ Scripted: part of `./deploy.sh`, based on `ACCESS_METHOD`.
   resets into the active system. The default 20 GB root has about 112 MB free after the
   13.4 GB airgap content partition, so the reset fails ("state partition not found"), the
   node stays in Kairos recovery, and any reboot hangs in GRUB.
-- **Under 200 GB, kubelet can delete images the cluster can't get back.** Kubernetes'
-  filesystem is the `COS_PERSISTENT` partition, which takes whatever the other partitions
-  leave: 59.8 GiB on a 100 GB root. During install, node 1 (the leader) passed kubelet's 85%
-  garbage-collection threshold, and kubelet deleted unused images to free space. Those
-  included images the appliance preloads on every node and never serves from the local
-  registry: mongo, cert-manager, metrics-server, the palette agent, `ubuntu-utils`, the
-  piraeus CSI images and the upgrade images. With no internet, any pod that later needs one
-  on that node fails with `ImagePullBackOff` against `us-docker.pkg.dev`. On a 200 GB root
-  the partition is about 153 GiB and the same install peaks around a third of it.
+- **Too small a root, and kubelet can delete images the cluster can't get back.**
+  Kubernetes' filesystem is the `COS_PERSISTENT` partition, which takes whatever the other
+  partitions leave: 59.8 GiB on a 100 GB root. During install on 100 GB roots, node 1 (the
+  leader) passed kubelet's 85% garbage-collection threshold, and kubelet deleted unused
+  images to free space. Those included images the appliance preloads on every node and never
+  serves from the local registry: mongo, cert-manager, metrics-server, the palette agent,
+  `ubuntu-utils`, the piraeus CSI images and the upgrade images. With no internet, any pod
+  that later needs one on that node fails with `ImagePullBackOff` against
+  `us-docker.pkg.dev`. **Use at least 300 GB.** The partition is then about 246 GiB, and the
+  same install peaks around a fifth of it, leaving room for upgrades and logs.
 
 **User data** (your Local UI user; the AMI's `kairos` password is locked on every boot):
 
@@ -369,7 +369,7 @@ clusters:
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `cos-recovery login:`; journal shows "state partition not found" | Root volume under 40 GB | Relaunch with 200 GB |
+| `cos-recovery login:`; journal shows "state partition not found" | Root volume under 40 GB | Relaunch with 300 GB |
 | Reboot hangs in GRUB: `no such device: COS_STATE` | Same | Same |
 | Status check "impaired", no disk activity after the reset | First active boot hung | Reboot the instance |
 | EICE `open-tunnel` fails or times out | Endpoint not `create-complete`, or the app group lacks "all from access" | Wait for the endpoint; check the rules |
@@ -381,7 +381,7 @@ clusters:
 | `dial tcp <VIP>:6443: no route to host` | NLB not created yet | `./deploy.sh` |
 | Node connections to the VIP hang | Client IP preservation on | `preserve_client_ip.enabled=false` on the target groups |
 | `mongo-0` stuck in `Init:0/1`, "mongo.key is empty"; configserver crash-looping | Helm re-applies the MongoDB key secret empty during install | Set the key (below) |
-| A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume under 200 GB); the node can't pull them back | Copy them from a healthy node (below); use 200 GB roots next time |
+| A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume too small); the node can't pull them back | Copy them from a healthy node (below); use at least 300 GB next time |
 
 **Set the MongoDB key:**
 

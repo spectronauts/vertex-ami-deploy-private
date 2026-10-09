@@ -3,7 +3,7 @@
 Deploys the appliance into networks that allow **no public subnets**: no internet gateway,
 no NAT gateway, no public IPs, no route to the internet anywhere in the VPC. There is no
 bastion; you reach the nodes through AWS's own services, picked per deployment with
-`ACCESS_METHOD`. Everything learned from testing the airgap guide is built in: a 200 GB root volume (so kubelet doesn't garbage-collect the preloaded images),
+`ACCESS_METHOD`. Everything learned from testing the airgap guide is built in: a 300 GB root volume (so kubelet doesn't garbage-collect the preloaded images),
 node-to-node rules, client IP preservation off, and the NLB created on a fixed VIP after
 Deploy Cluster.
 
