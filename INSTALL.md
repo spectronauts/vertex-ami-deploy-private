@@ -52,6 +52,9 @@ The scripts in this directory automate the AWS side; each step names the script 
 
 ## Architecture
 
+The diagram is also in [`architecture.excalidraw`](architecture.excalidraw): open it at
+[excalidraw.com](https://excalidraw.com) (menu, Open) or in the VS Code Excalidraw extension.
+
 ```
                          Your workstation
                                |

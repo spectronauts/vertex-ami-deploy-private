@@ -23,6 +23,7 @@ Deploy Cluster.
 | File | What it does |
 | --- | --- |
 | `INSTALL.md` | The install guide: quick steps, then every step in full, with troubleshooting |
+| `architecture.excalidraw` | Architecture diagram; open at excalidraw.com or in the VS Code Excalidraw extension |
 | `config.env.example` | Settings; copy to `config.env` |
 | `user-data.yaml.example` | The airgap guide's user data (`fusion` user); copy to `user-data.yaml`, set password and key |
 | `create-vpc.sh` | VPC and one private subnet; refuses any internet gateway or default route |
