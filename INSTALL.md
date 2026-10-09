@@ -80,7 +80,7 @@ nodes reach each other and the NLB, and nothing outside the VPC.
 - **An EC2 key pair** and its private key on your workstation. The AMI installs this key for
   the `kairos` user, so SSH works with it; `kairos` has no usable password.
 - **A Local UI user and password** for the user data, an **OCI Pack Registry password** for
-  cluster creation, and your **Ubuntu Pro token** (VerteX is sold with one) for the same step.
+  cluster creation, and your **Ubuntu Pro token** for the same step.
 
 | Parameter | Value used | Notes |
 | --- | --- | --- |
@@ -283,10 +283,10 @@ In Local UI on node 1:
 3. **Profile Config:**
    - **Vertex Addon Profile:** OCI Pack Registry Password.
    - **Ubuntu Pro Token (Optional)**, with the cluster profile options (Pod CIDR, Service
-     CIDR, image pull secret): enter your token here, during cluster creation. Spectro's
-     docs call it optional but recommended for security and compliance; the FIPS kernel is
-     already in the image. Adding it after deployment, from the cluster's configuration tab,
-     repaves every node, and in one field report the repave never finished.
+     CIDR, image pull secret): enter your token here, during cluster creation. It is
+     optional but recommended for security and compliance; the FIPS kernel is already in
+     the image. Adding it after deployment, from the cluster's configuration tab, repaves
+     every node.
    - Leave the rest at their defaults.
 4. **Cluster Config:** VIP = `10.0.11.210` (the free IP you chose).
 5. **Node Config:** control-plane-pool > **Add Item** > all three hosts.
@@ -400,9 +400,9 @@ done
 
 Images on the local registry (`<VIP>:30003/...`) are left out because nodes pull those again on
 demand. `drbd9-almalinux*` can be removed from the list on Ubuntu hosts. A stuck pod retries its
-pull at least every 5 minutes; delete it to retry right away. Don't copy through the EICE
-tunnel itself (`ssh node | ssh node`): it runs at about 0.4 MB/s and dropped the last 10 KB of
-a 378 MB layer.
+pull at least every 5 minutes; delete it to retry right away. Don't relay images through the
+EICE tunnel from your workstation (`ssh node | ssh node`): it is slow and can cut off the end
+of a large image.
 
 ---
 
