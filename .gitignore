@@ -1,0 +1,18 @@
+# Secrets and per-deployment settings: copy the .example files and fill them in.
+config.env
+user-data.yaml
+.fusion-password
+
+# Cluster-admin credentials written by ./connect.sh kubeconfig.
+kubeconfig-*
+
+# Written by deploy.sh: this deployment's resource IDs.
+outputs-*.txt
+
+# Image lists for copy-images.sh, specific to one deployment.
+images-*.txt
+
+# Working drafts, not part of the tooling.
+bug-*.md
+
+.DS_Store

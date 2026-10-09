@@ -1,0 +1,15 @@
+#cloud-config
+stages:
+  initramfs.after:
+    - users:
+        fusion:
+          groups:
+            - sudo
+            - admin
+          passwd: fusion
+          shell: /bin/bash
+          lock_passwd: false
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          ssh_authorized_keys:
+            - ssh-rsa abc@spectrocloud.com
+      name: "create admin user"
