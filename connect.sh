@@ -34,7 +34,8 @@ IDS=($(node_ids)); IPS=($(node_ips))
 
 need_key() {
   require_tools ssh
-  [[ -n "$SSH_KEY_FILE" && -f "$SSH_KEY_FILE" ]] || die "Set SSH_KEY_FILE in $CONFIG to the private key for $KEY_NAME."
+  [[ -n "$SSH_KEY_FILE" ]] || die "Set SSH_KEY_FILE in $CONFIG to the private key for $KEY_NAME."
+  [[ -f "$SSH_KEY_FILE" ]] || die "SSH_KEY_FILE in $CONFIG points to $SSH_KEY_FILE, which doesn't exist."
 }
 eice_opts() {  # sets EICE_OPTS: the ssh options that reach a node through the endpoint
   need_key
