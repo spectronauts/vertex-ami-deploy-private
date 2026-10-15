@@ -344,10 +344,30 @@ ensure_nlb() {
     ok "TCP $port -> ${NAME_PREFIX}-tg-$port (${#APP_IDS[@]} target(s))"
   done
 
-  log "Waiting for the NLB to become active"
-  aws elbv2 wait load-balancer-available --load-balancer-arns "$NLB_ARN"
+  wait_nlb_active
   NLB_DNS=$(aws_q elbv2 describe-load-balancers --load-balancer-arns "$NLB_ARN" --query 'LoadBalancers[0].DNSName')
   ok "NLB active: $NLB_DNS ($(nlb_private_ip "$NLB_ARN"))"
+}
+
+wait_nlb_active() {  # one live line (state and elapsed time) until NLB_ARN is active
+  local start=$SECONDS tick=0 state="" el
+  log "Waiting for the NLB to become active (usually 2-5 minutes)"
+  while :; do
+    el=$(elapsed $((SECONDS - start)))
+    if (( tick % 20 == 0 )); then                      # ask AWS every 5 seconds
+      state=$(aws_q elbv2 describe-load-balancers --load-balancer-arns "$NLB_ARN" --query 'LoadBalancers[0].State.Code')
+      case "$state" in
+        active) break ;;
+        active_impaired) warn "NLB is active but impaired."; break ;;
+        failed) end_line; die "NLB ${NAME_PREFIX}-nlb failed to provision." ;;
+      esac
+      if (( SECONDS - start > 900 )); then end_line; die "NLB still ${state:-unknown} after 15 minutes."; fi
+      if [[ ! -t 1 ]] && (( tick % 120 == 0 )); then echo "  NLB ${NAME_PREFIX}-nlb ${state:-checking} $el"; fi
+    fi
+    spin_line "$tick" "NLB ${NAME_PREFIX}-nlb ${state:-checking} $el"
+    sleep 0.25; tick=$((tick + 1))
+  done
+  check_line "NLB ${NAME_PREFIX}-nlb active after $(elapsed $((SECONDS - start)))"
 }
 
 # ---------------------------------------------------------------------------

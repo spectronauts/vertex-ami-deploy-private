@@ -137,17 +137,6 @@ ui_login() {  # local-port -> a login JWT for LOCALUI_USER, password in LOCALUI_
          jq -cn '{username: env.LOCALUI_USER, password: env.LOCALUI_PASS}')
   AUTH="" ui_api "$1" POST '/v1/users/default/login?extendedSession=true' "$body" | jq -r '.Token.Authorization // empty'
 }
-SPIN=('|' '/' '-' '\')
-GREEN_CHECK=$'\033[1;32m✓\033[0m'
-spin_line() {  # tick text: one in-place line with a spinner (terminals only)
-  if [[ -t 1 ]]; then printf '\r\033[K  %s %s' "${SPIN[$(($1 % 4))]}" "$2"; fi
-}
-check_line() {  # text: finish the current line with a green check
-  if [[ -t 1 ]]; then printf '\r\033[K'; fi
-  printf '  %s %s\n' "$GREEN_CHECK" "$1"
-}
-end_line() { if [[ -t 1 ]]; then printf '\n'; fi; }
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 peer_state() {  # link-status-json ip -> "status<TAB>content<TAB>health", empty if node 1 doesn't list ip
   jq -r --arg ip "$2" '[.peers[]? | select(.ip == $ip)][0] // empty
     | "\(.status // "-")\t\(.contentSyncStatus // "-")\t\(.health.status // "-")"' <<<"$1"

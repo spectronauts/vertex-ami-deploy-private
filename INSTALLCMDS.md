@@ -85,7 +85,9 @@ In Local UI, create the cluster with VIP = `NLB_PRIVATE_IP` and your Ubuntu Pro 
 
 ```bash
 ./deploy.sh                       # creates the NLB on the VIP, target groups and listeners
-./status.sh                       # 6443, then 30003, then 443 turn healthy; options: -c <file>
+./status.sh --watch               # live: NLB state and each port's health with elapsed time,
+                                  # until all are healthy (6443, then 30003, then 443)
+                                  # options: -c <file>  --watch (without it: a snapshot)
 ./connect.sh ssh 1                # options: ssh [N], N = node number (default 1)
 sudo journalctl -u stylus-agent -f    # on the node: follow the install
 ```
@@ -113,7 +115,7 @@ done
 ## 9. Validate
 
 ```bash
-./status.sh                       # all four target groups healthy on every node
+./status.sh                       # snapshot: all four target groups healthy on every node
 ./connect.sh ssh 1                # then, on node 1:
 sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes      # three Ready control-plane nodes
 sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -A    # all Running or Completed

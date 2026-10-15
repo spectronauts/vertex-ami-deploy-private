@@ -100,6 +100,22 @@ port_open() {  # host port -> 0 if something accepts TCP connections there (bash
   (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null
 }
 
+# --- Live progress: in-place spinner lines in a terminal, plain lines otherwise -------------
+SPIN=('|' '/' '-' '\')
+GREEN_CHECK=$'\033[1;32m✓\033[0m'
+spin_line() {  # tick text: one in-place line with a spinner (terminals only)
+  if [[ -t 1 ]]; then printf '\r\033[K  %s %s' "${SPIN[$(($1 % 4))]}" "$2"; fi
+}
+check_line() {  # text: finish the current line with a green check
+  if [[ -t 1 ]]; then printf '\r\033[K'; fi
+  printf '  %s %s\n' "$GREEN_CHECK" "$1"
+}
+end_line() { if [[ -t 1 ]]; then printf '\n'; fi; }
+elapsed() {  # seconds -> "42s" or "3m05s"
+  if [[ $1 -lt 60 ]]; then echo "${1}s"; else printf '%dm%02ds\n' $(($1 / 60)) $(($1 % 60)); fi
+}
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
 tags() {  # resource-type name -> a --tag-specifications value
   echo "ResourceType=$1,Tags=[{Key=Name,Value=$2},{Key=$TAG_KEY,Value=$NAME_PREFIX}]"
 }

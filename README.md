@@ -32,7 +32,7 @@ needs `curl` and `jq`.
 | `create-vpc.sh` | VPC and one private subnet; refuses any internet gateway or default route |
 | `deploy.sh` | Security groups, the access path, the nodes, and (without `--no-nlb`) the NLB on the VIP |
 | `connect.sh` | `localui`, `link`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
-| `status.sh` | Instances, access path, NLB and target health |
+| `status.sh` | Instances, access path, NLB and target health; `--watch` updates live until all are healthy |
 | `teardown.sh` | Deletes everything, VPC and IAM role included; `--nlb-only` deletes just the NLB |
 
 ## Run
@@ -56,7 +56,7 @@ your Ubuntu Pro token, and click **Deploy Cluster**. Right after:
 
 ```bash
 ./deploy.sh                                    # creates the NLB on the VIP
-./status.sh                                    # 6443, 30003, 443 turn healthy as the cluster comes up
+./status.sh --watch                            # live until 6443, 30003, 443 are healthy on every node
 ```
 
 The NLB must not exist when you enter the VIP: Local UI refuses an IP that any device

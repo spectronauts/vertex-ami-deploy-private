@@ -364,13 +364,16 @@ Observed on 2026-10-09 (Deploy Cluster at about 13:57 UTC, NLB created within a 
 
 Follow progress with `./connect.sh ssh 1` and `sudo journalctl -u stylus-agent -f`. Pulls from
 `<VIP>:30003` fail with "connection refused" or "not found" until the registry is up and loaded,
-then clear. `./status.sh` shows target health.
+then clear. `./status.sh --watch` shows the NLB state and each port's target health live,
+with the elapsed time, until every port is healthy on every node (`./status.sh` alone prints
+a snapshot). `./deploy.sh` likewise shows the NLB's state and elapsed time while it
+provisions, usually 2-5 minutes.
 
 ---
 
 ## Step 9 - Validate
 
-- [ ] All four target groups healthy on all three nodes (`./status.sh`).
+- [ ] All four target groups healthy on all three nodes (`./status.sh --watch` ends with a check).
 - [ ] On node 1: `sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes` lists three
       Ready control-plane nodes.
 - [ ] `kubectl get pods -A` shows nothing outside Running or Completed, `hubble-system` included.
