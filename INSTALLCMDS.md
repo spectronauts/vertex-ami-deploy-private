@@ -3,7 +3,7 @@
 The commands from [INSTALL.md](INSTALL.md), in order, with their options. Run them from this
 directory. Every script also takes `-c <file>` to use a config other than `config.env`.
 
-## 0. Configure
+## 1. Configure
 
 ```bash
 cp config.env.example config.env
@@ -28,13 +28,13 @@ PRIVATE_CIDR="10.0.11.0/24"
 NAME_PREFIX="vxp"                 # name and tag prefix for every resource
 ```
 
-## 1. Network
+## 2. Network
 
 ```bash
 ./create-vpc.sh                   # options: -c <file>
 ```
 
-## 2-4. Security groups, access path, nodes (no NLB yet)
+## 3-5. Security groups, access path, nodes (no NLB yet)
 
 ```bash
 ./deploy.sh --preflight-only      # checks settings, tools and credentials; creates nothing
@@ -49,7 +49,7 @@ aws ec2 create-instance-connect-endpoint --subnet-id <private-subnet-id> \
   --security-group-ids <access-sg-id> --no-preserve-client-ip
 ```
 
-## 5. Wait for Local UI (25-30 minutes), then forward it
+## 6. Wait for Local UI (25-30 minutes), then forward it
 
 ```bash
 ./connect.sh nodes                # node number, instance ID and private IP
@@ -67,7 +67,7 @@ aws ssm start-session --target <jump-host-id> --document-name AWS-StartPortForwa
   --parameters '{"host":["<node-ip>"],"portNumber":["5080"],"localPortNumber":["5080"]}'
 ```
 
-## 6-7. Link the nodes, create the cluster, then the NLB
+## 7-8. Link the nodes, create the cluster, then the NLB
 
 In Local UI, link nodes 2 and 3 to node 1, then create the cluster with VIP = `NLB_PRIVATE_IP`
 and your Ubuntu Pro token, and click **Deploy Cluster**. Within a minute:
@@ -99,7 +99,7 @@ for port in 443 6443 30003 5080; do
 done
 ```
 
-## 8. Validate
+## 9. Validate
 
 ```bash
 ./status.sh                       # all four target groups healthy on every node
