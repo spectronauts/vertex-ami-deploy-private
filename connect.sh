@@ -137,14 +137,34 @@ ui_login() {  # local-port -> a login JWT for LOCALUI_USER, password in LOCALUI_
          jq -cn '{username: env.LOCALUI_USER, password: env.LOCALUI_PASS}')
   AUTH="" ui_api "$1" POST '/v1/users/default/login?extendedSession=true' "$body" | jq -r '.Token.Authorization // empty'
 }
+SPIN=('|' '/' '-' '\')
+GREEN_CHECK=$'\033[1;32m✓\033[0m'
+spin_line() {  # tick text: one in-place line with a spinner (terminals only)
+  if [[ -t 1 ]]; then printf '\r\033[K  %s %s' "${SPIN[$(($1 % 4))]}" "$2"; fi
+}
+check_line() {  # text: finish the current line with a green check
+  if [[ -t 1 ]]; then printf '\r\033[K'; fi
+  printf '  %s %s\n' "$GREEN_CHECK" "$1"
+}
+end_line() { if [[ -t 1 ]]; then printf '\n'; fi; }
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+peer_state() {  # link-status-json ip -> "status<TAB>content<TAB>health", empty if node 1 doesn't list ip
+  jq -r --arg ip "$2" '[.peers[]? | select(.ip == $ip)][0] // empty
+    | "\(.status // "-")\t\(.contentSyncStatus // "-")\t\(.health.status // "-")"' <<<"$1"
+}
+peer_ready() {  # status content health -> 0 once the node is Ready, Synced and Healthy
+  [[ "$(lower "$1")" == ready && "$(lower "$3")" == healthy ]] || return 1
+  case "$(lower "$2")" in synced|completed|success|succeeded|done) return 0 ;; esac
+  return 1
+}
 link_nodes() {  # base-port node-count: node N's Local UI is forwarded to localhost:<base-port + N - 1>
-  local base=$1 n=$2 i p t st res lt try rows last="" ready total missing ip
+  local base=$1 n=$2 i p t st res lt try tick label
   local tok=()
   for ((i = 0; i < n; i++)); do
     t=""
     for try in 1 2 3; do
       t=$(ui_login $((base + i))) || t=""
-      [[ -n "$t" ]] && break
+      if [[ -n "$t" ]]; then break; fi
       sleep 5
     done
     [[ -n "$t" ]] || die "Could not sign in to Local UI on node $((i + 1)) as $LOCALUI_USER (wrong password, or Local UI not up yet: it starts 25-30 minutes after launch)."
@@ -153,45 +173,73 @@ link_nodes() {  # base-port node-count: node N's Local UI is forwarded to localh
   ok "Signed in to Local UI on all $n nodes as $LOCALUI_USER"
 
   for ((i = 1; i < n; i++)); do
-    p=$((base + i))
+    p=$((base + i)); label="node $((i + 1)) (${IPS[$i]})"
     st=$(AUTH=${tok[$i]} ui_api "$p" GET "$LINK_API/status" | jq -r '.status // empty') || st=""
-    if [[ "$st" == Completed ]]; then ok "Node $((i + 1)) is already linked"; continue; fi
+    if [[ "$st" == Completed ]]; then check_line "$label already linked"; continue; fi
     # A link token holds node 1's IP and a one-time password that lasts two minutes: get a fresh one.
     lt=$(AUTH=${tok[0]} ui_api "$base" POST "$LINK_API/generate-token" | jq -r '.token // empty') || lt=""
     [[ -n "$lt" ]] || die "Node 1 did not return a link token."
     AUTH=${tok[$i]} ui_api "$p" POST "$LINK_API" "$(jq -cn --arg t "$lt" '{token: $t}')" >/dev/null \
-      || die "Node $((i + 1)) did not accept node 1's link token."
-    for try in $(seq 1 60); do
-      res=$(AUTH=${tok[$i]} ui_api "$p" GET "$LINK_API/status") || res='{}'
-      st=$(jq -r '.status // empty' <<<"$res")
-      case "$st" in
-        Completed) ok "Node $((i + 1)) linked to node 1"; break ;;
-        Failed) die "Linking node $((i + 1)) failed: $(jq -r '.errorMessage // "no message"' <<<"$res")" ;;
-      esac
-      sleep 5
+      || die "$label did not accept node 1's link token."
+    st=""
+    for ((tick = 0; tick < 1200; tick++)); do          # up to 5 minutes, in quarter seconds
+      if (( tick % 20 == 0 )); then                    # ask every 5 seconds
+        res=$(AUTH=${tok[$i]} ui_api "$p" GET "$LINK_API/status") || res='{}'
+        st=$(jq -r '.status // empty' <<<"$res")
+        if [[ "$st" == Completed ]]; then break; fi
+        if [[ "$st" == Failed ]]; then
+          end_line; die "Linking $label failed: $(jq -r '.errorMessage // "no message"' <<<"$res")"
+        fi
+      fi
+      spin_line "$tick" "$label linking${st:+ ($st)}"
+      sleep 0.25
     done
-    [[ "$st" == Completed ]] || die "Node $((i + 1)) link still ${st:-pending} after 5 minutes."
+    if [[ "$st" != Completed ]]; then end_line; die "$label link still ${st:-pending} after 5 minutes."; fi
+    check_line "$label linked"
   done
-
-  log "Waiting for node 1 to show every node Ready, Synced and Healthy (IP, status, content, health)"
-  for try in $(seq 1 120); do
-    res=$(AUTH=${tok[0]} ui_api "$base" GET "$LINK_API/status") || res='{}'
-    rows=$(jq -r '.peers[]? | "    \(.ip // "?")  \(.status // "-")  \(.contentSyncStatus // "-")  \(.health.status // "-")"' <<<"$res")
-    if [[ -n "$rows" && "$rows" != "$last" ]]; then echo "$rows"; last=$rows; fi
-    missing=0
-    for ((i = 1; i < n; i++)); do
-      ip=${IPS[$i]}
-      jq -e --arg ip "$ip" '[.peers[]? | select(.ip == $ip)] | length > 0' <<<"$res" >/dev/null || missing=1
-    done
-    total=$(jq '[.peers[]?] | length' <<<"$res")
-    ready=$(jq '[.peers[]? | select(.status == "Ready" and .health.status == "Healthy"
-                   and ((.contentSyncStatus // "") | ascii_downcase) == "synced")] | length' <<<"$res")
-    if [[ $missing -eq 0 && $total -gt 0 && $ready -eq $total ]]; then
-      ok "All $n nodes are linked: Ready, Synced and Healthy"; return 0
+  wait_synced "$base" "$n" "${tok[0]}"
+}
+wait_synced() {  # base-port node-count leader-jwt: one line per node until node 1 shows it Ready, Synced, Healthy
+  local base=$1 n=$2 jwt=$3 i tick res state s c h all drawn=0
+  local text=() ready=() shown=()
+  log "Waiting for node 1 to show every node Ready, Synced and Healthy"
+  for ((tick = 0; tick < 2400; tick++)); do            # up to 10 minutes, in quarter seconds
+    if (( tick % 20 == 0 )); then
+      res=$(AUTH=$jwt ui_api "$base" GET "$LINK_API/status") || res='{}'
+      all=1
+      for ((i = 0; i < n; i++)); do
+        state=$(peer_state "$res" "${IPS[$i]}")
+        if [[ -z "$state" ]]; then
+          ready[$i]=0
+          if [[ $i -eq 0 ]]; then ready[$i]=1; text[$i]="node 1 (${IPS[0]}) leader"
+          else text[$i]="node $((i + 1)) (${IPS[$i]}) not listed by node 1 yet"; fi
+        else
+          IFS=$'\t' read -r s c h <<<"$state"
+          text[$i]="node $((i + 1)) (${IPS[$i]}) $s, $c, $h"
+          if peer_ready "$s" "$c" "$h"; then ready[$i]=1; else ready[$i]=0; fi
+        fi
+        if [[ ${ready[$i]} -eq 0 ]]; then all=0; fi
+      done
     fi
-    sleep 5
+    if [[ -t 1 ]]; then                                # redraw the lines in place
+      if [[ $drawn -eq 1 ]]; then printf '\033[%dA' "$n"; fi
+      for ((i = 0; i < n; i++)); do
+        if [[ ${ready[$i]} -eq 1 ]]; then printf '\r\033[K  %s %s\n' "$GREEN_CHECK" "${text[$i]}"
+        else printf '\r\033[K  %s %s\n' "${SPIN[$((tick % 4))]}" "${text[$i]}"; fi
+      done
+      drawn=1
+    elif (( tick % 20 == 0 )); then                    # not a terminal: print what changed
+      for ((i = 0; i < n; i++)); do
+        if [[ "${shown[$i]:-}" != "${text[$i]}" ]]; then
+          if [[ ${ready[$i]} -eq 1 ]]; then echo "  ✓ ${text[$i]}"; else echo "  … ${text[$i]}"; fi
+          shown[$i]=${text[$i]}
+        fi
+      done
+    fi
+    if [[ $all -eq 1 ]]; then ok "All $n nodes are linked: Ready, Synced and Healthy"; return 0; fi
+    sleep 0.25
   done
-  die "After 10 minutes not every node is Ready, Synced and Healthy; check Linked Edge Hosts in Local UI on node 1."
+  die "After 10 minutes not every node is Ready, Synced and Healthy. Node 1 lists: $(jq -r '[.peers[]? | .ip // "?"] | join(", ")' <<<"$res")"
 }
 
 case "$CMD" in
