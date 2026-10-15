@@ -3,8 +3,8 @@
 #
 # Usage: ./connect.sh [-c config.env] <command>
 #   localui      forward every node's Local UI: node N -> https://localhost:<5079+N>
-#   link         link nodes 2..N to node 1 through the Local UI API, no clicking; signs in
-#                as LOCALUI_USER with LOCALUI_PASSWORD (asked for if unset); needs curl, jq
+#   link         link nodes 2..N to node 1 through the Local UI API, no clicking; signs in as
+#                the user and password in USER_DATA_FILE (LOCALUI_USER, LOCALUI_PASSWORD override)
 #   ssh [N]      shell on node N (default 1) as SSH_USER
 #   api          forward the VIP's Kubernetes API to https://localhost:6443 (for kubectl)
 #   kubeconfig [file]  copy node 1's admin kubeconfig, pointed at the api forward
@@ -78,6 +78,57 @@ ui_api() {  # local-port method path [json-body] -> response body; AUTH (a login
     return 1
   fi
   printf '%s\n' "$out"
+}
+userdata_login() {  # user-data-file -> "user<TAB>passwd" for the first user under users:
+  awk -v q="'" '
+    /^[[:space:]]*-?[[:space:]]*users:[[:space:]]*$/ { inusers = 1; uind = -1; next }
+    inusers && /^[[:space:]]*$/ { next }
+    inusers {
+      match($0, /^[[:space:]]*/); ind = RLENGTH
+      if (uind < 0) {
+        if ($0 !~ /^[[:space:]]*[A-Za-z0-9_.-]+:[[:space:]]*$/) exit
+        uind = ind; user = $0; gsub(/[[:space:]:]/, "", user); next
+      }
+      if (ind <= uind) exit                     # the next user, or the end of the block
+      if ($0 ~ /^[[:space:]]*passwd:/) {
+        pw = $0; sub(/^[[:space:]]*passwd:[[:space:]]*/, "", pw)
+        c = substr(pw, 1, 1); out = ""
+        if (c == q) {                           # single-quoted: '' is a literal quote
+          for (i = 2; i <= length(pw); i++) {
+            ch = substr(pw, i, 1)
+            if (ch == q) { if (substr(pw, i + 1, 1) == q) { out = out q; i++ } else break }
+            else out = out ch
+          }
+          pw = out
+        } else if (c == "\"") {                 # double-quoted: \" and \\ are escapes
+          for (i = 2; i <= length(pw); i++) {
+            ch = substr(pw, i, 1)
+            if (ch == "\\") { i++; out = out substr(pw, i, 1) }
+            else if (ch == "\"") break
+            else out = out ch
+          }
+          pw = out
+        } else sub(/[[:space:]]+#.*$/, "", pw)
+      }
+    }
+    END { if (user != "") printf "%s\t%s\n", user, pw }
+  ' "$1"
+}
+localui_credentials() {  # sets LOCALUI_USER, LOCALUI_PASS and LOCALUI_FROM (where the password came from)
+  local ud_user="" ud_pass=""
+  if [[ -f "$USER_DATA_FILE" ]]; then
+    IFS=$'\t' read -r ud_user ud_pass < <(userdata_login "$USER_DATA_FILE") || true
+  fi
+  LOCALUI_USER="${LOCALUI_USER:-${ud_user:-fusion}}"
+  LOCALUI_PASS="${LOCALUI_PASSWORD:-}"; LOCALUI_FROM="LOCALUI_PASSWORD"
+  # A hashed passwd ($6$...) can't be used to sign in; nor can another user's.
+  if [[ -z "$LOCALUI_PASS" && -n "$ud_pass" && "$ud_pass" != \$* && "$LOCALUI_USER" == "$ud_user" ]]; then
+    LOCALUI_PASS=$ud_pass; LOCALUI_FROM="$USER_DATA_FILE"
+  fi
+  if [[ -z "$LOCALUI_PASS" ]]; then
+    read -r -s -p "Local UI password for $LOCALUI_USER: " LOCALUI_PASS; echo >&2; LOCALUI_FROM="prompt"
+  fi
+  [[ -n "$LOCALUI_PASS" ]] || die "No Local UI password for $LOCALUI_USER."
 }
 ui_login() {  # local-port -> a login JWT for LOCALUI_USER, password in LOCALUI_PASS
   local body
@@ -175,9 +226,8 @@ case "$CMD" in
     # node 1 lists every node Ready, Synced and Healthy. Safe to re-run: linked nodes are skipped.
     [[ ${#IDS[@]} -ge 2 ]] || die "Linking needs at least two nodes."
     require_tools curl jq
-    LOCALUI_PASS="${LOCALUI_PASSWORD:-}"
-    if [[ -z "$LOCALUI_PASS" ]]; then read -r -s -p "Local UI password for $LOCALUI_USER: " LOCALUI_PASS; echo; fi
-    [[ -n "$LOCALUI_PASS" ]] || die "No Local UI password given."
+    localui_credentials
+    ok "Local UI user $LOCALUI_USER, password from $LOCALUI_FROM"
     base=15080   # local ports clear of ./connect.sh localui's, so both can run at once
     trap 'kill $(jobs -p) 2>/dev/null' EXIT
     if [[ "$ACCESS_METHOD" == "eice" ]]; then

@@ -18,7 +18,7 @@ REGION="us-gov-west-1"            # required
 AMI_ID="<appliance-ami-id>"       # required: the VerteX appliance AMI
 KEY_NAME="<key-pair-name>"        # required: EC2 key pair for SSH to the nodes
 SSH_KEY_FILE="<path-to-key.pem>"  # private key for KEY_NAME, used by connect.sh
-LOCALUI_USER="fusion"             # Local UI user from user-data.yaml, for ./connect.sh link
+LOCALUI_USER=""                   # ./connect.sh link; empty = the user in user-data.yaml
 ACCESS_METHOD="eice"              # eice | ssm
 NLB_PRIVATE_IP="10.0.11.210"      # the VIP: a free IP in PRIVATE_CIDR
 APP_COUNT=3                       # 1 | 3 nodes
@@ -74,7 +74,8 @@ aws ssm start-session --target <jump-host-id> --document-name AWS-StartPortForwa
 Link nodes 2 and 3 to node 1, in Local UI or through its API:
 
 ```bash
-./connect.sh link                 # signs in as LOCALUI_USER; password from LOCALUI_PASSWORD or asked
+./connect.sh link                 # signs in with the user and password in user-data.yaml
+                                  # (LOCALUI_USER, LOCALUI_PASSWORD override; asks if hashed)
                                   # waits until node 1 shows every node Ready, Synced, Healthy
                                   # safe to re-run; needs curl and jq
 ```

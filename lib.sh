@@ -18,7 +18,7 @@ source "$CONFIG"
 : "${DATA_VOLUME_COUNT:=1}" "${DATA_VOLUME_SIZE_GB:=500}"
 : "${USER_DATA_FILE:=user-data.yaml}" "${NODE_TO_NODE:=true}" "${PRESERVE_CLIENT_IP:=false}" "${NLB_PRIVATE_IP:=}"
 : "${ACCESS_METHOD:=eice}" "${JUMP_INSTANCE_TYPE:=t3.micro}" "${SSH_USER:=kairos}" "${SSH_KEY_FILE:=}"
-: "${LOCALUI_USER:=fusion}"
+: "${LOCALUI_USER:=}"
 : "${JUMP_AMI_SSM_PARAM:=/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}"
 
 [[ -n "${REGION:-}" ]] || die "REGION is required in $CONFIG (for example us-gov-west-1)."

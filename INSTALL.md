@@ -292,8 +292,9 @@ on its first active boot; reboot it.
 ./connect.sh link
 ```
 
-It signs in to every node as `LOCALUI_USER` (default `fusion`, your user-data user), using
-`LOCALUI_PASSWORD` if set or asking for the password. It then has node 1 generate a fresh link
+It signs in to every node with the user and password from your user data (`user-data.yaml`).
+`LOCALUI_USER` and `LOCALUI_PASSWORD` override them, and it asks for the password if the user
+data holds only a hashed one. It then has node 1 generate a fresh link
 token for each other node, links that node, and waits until node 1 lists every node **Ready**,
 **Synced** and **Healthy**. Nodes that are already linked are skipped, so it is safe to run
 again. It opens its own forwards on local ports 15080 and up, so `./connect.sh localui` can stay
