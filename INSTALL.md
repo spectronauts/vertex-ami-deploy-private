@@ -18,6 +18,8 @@ For just the commands, see [INSTALLCMDS.md](INSTALLCMDS.md).
 
 ## Quick steps
 
+- **Configure:** copy `config.env.example` and `user-data.yaml.example`; set the AMI,
+  key pair, access method and VIP, and your Local UI user's password and SSH key.
 - **Pick a region and one availability zone** that offers m5.2xlarge.
 - **Build the network:** a VPC (DNS support and DNS hostnames on) with **one private subnet**
   and a route table with **no default route**. No internet gateway, no NAT.
@@ -38,8 +40,8 @@ For just the commands, see [INSTALLCMDS.md](INSTALLCMDS.md).
 - **Open Local UI from your workstation:** forward each node's port 5080 (`./connect.sh
   localui`) and open node 1 at `https://localhost:5080`, node 2 at `https://127.0.0.1:5081`,
   node 3 at `https://[::1]:5082`.
-- **Link the nodes:** node 1 generates a token; nodes 2 and 3 link to it. Wait for Ready and
-  Synced/Healthy. Or run `./connect.sh link` to do it through the Local UI API.
+- **Link the nodes:** `./connect.sh link` links nodes 2 and 3 to node 1 and waits until all
+  three are Ready, Synced and Healthy (or link them in Local UI).
 - **Create the cluster:** embedded config, OCI Pack Registry password, your **Ubuntu Pro
   token** (Profile Config; enter it now, not after deployment), **VIP = the IP you chose**,
   all three nodes in control-plane-pool, **Deploy Cluster**.
@@ -89,14 +91,28 @@ nodes reach each other and the NLB, and nothing outside the VPC.
 | VPC CIDR | 10.0.0.0/16 | |
 | Private subnet | 10.0.11.0/24 | Nodes, NLB and access endpoints |
 | Nodes | 3 x m5.2xlarge | 1 also works |
-| Root volume | 300 GB gp3 | **At least 300 GB** (Step 4) |
+| Root volume | 300 GB gp3 | **At least 300 GB** (Step 5) |
 | Data volume | 1 x 500 GB gp3 | The AMI builds its storage pool (LINSTOR/DRBD) on it |
 | VIP | 10.0.11.210 | Free IP in the private subnet; becomes the NLB's IP |
 | Access | EICE or SSM | `ACCESS_METHOD` in `config.env` |
 
 ---
 
-## Step 1 - Network
+## Step 1 - Configure
+
+```
+cp config.env.example config.env
+cp user-data.yaml.example user-data.yaml
+```
+
+- **`config.env`:** set `REGION`, `AMI_ID`, `KEY_NAME` (your EC2 key pair), `SSH_KEY_FILE` (its
+  private key), `ACCESS_METHOD` (`eice` or `ssm`) and `NLB_PRIVATE_IP` (the VIP: a free IP in
+  the private subnet). The other settings have working defaults.
+- **`user-data.yaml`:** set your Local UI user's password and SSH public key (Step 5).
+
+---
+
+## Step 2 - Network
 
 | Resource | Settings |
 | --- | --- |
@@ -111,7 +127,7 @@ Scripted: `./create-vpc.sh` (refuses an internet gateway or any default route).
 
 ---
 
-## Step 2 - Security groups
+## Step 3 - Security groups
 
 Create the groups empty, remove each one's default allow-all outbound rule, then add:
 
@@ -133,7 +149,7 @@ Scripted: part of `./deploy.sh`.
 
 ---
 
-## Step 3 - Access path
+## Step 4 - Access path
 
 ### Option A: EC2 Instance Connect Endpoint (`ACCESS_METHOD=eice`)
 
@@ -175,7 +191,7 @@ Scripted: part of `./deploy.sh`, based on `ACCESS_METHOD`.
 
 ---
 
-## Step 4 - Nodes
+## Step 5 - Nodes
 
 | Setting | Value |
 | --- | --- |
@@ -243,7 +259,7 @@ groups yet).
 
 ---
 
-## Step 5 - Wait for Local UI
+## Step 6 - Wait for Local UI
 
 Observed timing (2026-10-09):
 
@@ -277,7 +293,23 @@ on its first active boot; reboot it.
 
 ---
 
-## Step 6 - Link the nodes
+## Step 7 - Link the nodes
+
+Link nodes 2 and 3 to node 1 from your workstation, through the Local UI API:
+
+```
+./connect.sh link
+```
+
+It signs in to every node with the user and password from your user data (`user-data.yaml`).
+`LOCALUI_USER` and `LOCALUI_PASSWORD` override them, and it asks for the password if the user
+data holds only a hashed one. It then has node 1 generate a fresh link token for each other
+node, links that node, and waits until node 1 lists every node **Ready**, **Synced** and
+**Healthy**, showing one line per node that turns into a green check. Nodes that are already
+linked are skipped, so it is safe to run again. It opens its own forwards on local ports 15080
+and up, so `./connect.sh localui` can stay running.
+
+**Or in Local UI:**
 
 1. Node 1 (`https://localhost:5080`): sign in with your user-data user, **Linked Edge Hosts >
    Generate token**, copy it.
@@ -286,23 +318,9 @@ on its first active boot; reboot it.
 3. Node 3 (`https://[::1]:5082`): the same. Generate a new token if one is rejected.
 4. On node 1, wait until all three show **Ready** and **Synced / Healthy**.
 
-**Or link them from your workstation** through the Local UI API, with no clicking:
-
-```
-./connect.sh link
-```
-
-It signs in to every node with the user and password from your user data (`user-data.yaml`).
-`LOCALUI_USER` and `LOCALUI_PASSWORD` override them, and it asks for the password if the user
-data holds only a hashed one. It then has node 1 generate a fresh link
-token for each other node, links that node, and waits until node 1 lists every node **Ready**,
-**Synced** and **Healthy**. Nodes that are already linked are skipped, so it is safe to run
-again. It opens its own forwards on local ports 15080 and up, so `./connect.sh localui` can stay
-running.
-
 ---
 
-## Step 7 - Create the cluster, then the NLB
+## Step 8 - Create the cluster, then the NLB
 
 Local UI refuses a VIP that any device already owns ("VIP address is already assigned to a
 device on the network"), and an NLB's IP belongs to its network interface. So the NLB must not
@@ -350,7 +368,7 @@ then clear. `./status.sh` shows target health.
 
 ---
 
-## Step 8 - Validate
+## Step 9 - Validate
 
 - [ ] All four target groups healthy on all three nodes (`./status.sh`).
 - [ ] On node 1: `sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes` lists three
@@ -397,7 +415,7 @@ clusters:
 | `dial tcp <VIP>:6443: no route to host` | NLB not created yet | `./deploy.sh` |
 | Node connections to the VIP hang | Client IP preservation on | `preserve_client_ip.enabled=false` on the target groups |
 | `mongo-0` stuck in `Init:0/1`, "mongo.key is empty"; configserver crash-looping | Helm re-applies the MongoDB key secret empty during install | Set the key (below) |
-| A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume too small); the node can't pull them back | Redeploy with root volumes of at least 300 GB (Step 4) |
+| A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume too small); the node can't pull them back | Redeploy with root volumes of at least 300 GB (Step 5) |
 
 **Set the MongoDB key:**
 

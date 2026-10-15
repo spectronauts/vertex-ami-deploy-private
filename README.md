@@ -1,10 +1,11 @@
 # Deploy the VerteX Appliance in an Airgapped environment
+
 Deploys the appliance into networks that allow **no public subnets**: no internet gateway,
 no NAT gateway, no public IPs, no route to the internet anywhere in the VPC. There is no
 bastion; you reach the nodes through AWS's own services, picked per deployment with
-`ACCESS_METHOD`. Everything learned from testing the airgap guide is built in: a 300 GB root volume (so kubelet doesn't garbage-collect the preloaded images),
-node-to-node rules, client IP preservation off, and the NLB created on a fixed VIP after
-Deploy Cluster.
+`ACCESS_METHOD`. Everything learned from testing the airgap guide is built in: a 300 GB root
+volume (so kubelet doesn't garbage-collect the preloaded images), node-to-node rules, client
+IP preservation off, and the NLB created on a fixed VIP after Deploy Cluster.
 
 ## Access methods
 
@@ -15,7 +16,8 @@ Deploy Cluster.
 | How you get in | SSH (port 22) through the endpoint; Local UI and the API ride `ssh -L` through node 1 | `aws ssm start-session` port forwarding to any node port |
 | Needs on your workstation | AWS CLI v2.12+, OpenSSH, your EC2 private key (`SSH_KEY_FILE`) | AWS CLI v2, `session-manager-plugin`; the key only for `ssh` |
 
-`./connect.sh` hides the difference: the same commands work for both.
+`./connect.sh` hides the difference: the same commands work for both. `./connect.sh link` also
+needs `curl` and `jq`.
 
 ## Files
 
@@ -45,12 +47,12 @@ cp user-data.yaml.example user-data.yaml       # set the password and your SSH p
 ./create-vpc.sh
 ./deploy.sh --no-nlb                           # everything except the NLB
 ./connect.sh localui                           # after ~25-30 min: https://localhost:5080, :5081, :5082
+./connect.sh link                              # links nodes 2 and 3 to node 1, waits until all are ready
 ```
 
-Then in Local UI (node 1 at `https://localhost:5080`): sign in with the user-data user,
-generate a link token, and link the other nodes at `https://127.0.0.1:5081` and
-`https://[::1]:5082` (different host names keep each node's login separate). Create the
-cluster with **VIP = `NLB_PRIVATE_IP`** and click **Deploy Cluster**. Right after:
+`./connect.sh link` signs in with the user and password from `user-data.yaml`. Then in Local
+UI on node 1 (`https://localhost:5080`), create the cluster with **VIP = `NLB_PRIVATE_IP`** and
+your Ubuntu Pro token, and click **Deploy Cluster**. Right after:
 
 ```bash
 ./deploy.sh                                    # creates the NLB on the VIP

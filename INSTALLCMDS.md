@@ -1,7 +1,7 @@
 # VerteX appliance on AWS, private subnets only: commands
 
-The commands from [INSTALL.md](INSTALL.md), in order, with their options. Run them from this
-directory. Every script also takes `-c <file>` to use a config other than `config.env`.
+The commands from [INSTALL.md](INSTALL.md), in order, with their options; section numbers
+match INSTALL.md's steps. Run them from this directory. Every script also takes `-c <file>` to use a config other than `config.env`.
 
 ## 1. Configure
 

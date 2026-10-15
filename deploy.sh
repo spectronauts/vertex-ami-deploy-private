@@ -60,7 +60,7 @@ preflight() {
     || die "AMI $AMI_ID is not available in $REGION."
   ROOT_DEVICE=$(aws_q ec2 describe-images --image-ids "$AMI_ID" --query 'Images[0].RootDeviceName')
   ok "AMI $AMI_ID available"
-  # Two floors (INSTALL.md Step 4). Below about 40 GB the AMI's first-boot reset can't add its
+  # Two floors (INSTALL.md Step 5). Below about 40 GB the AMI's first-boot reset can't add its
   # 19,780 MiB COS_STATE partition and the node stays in Kairos recovery. Below 300 GB the
   # COS_PERSISTENT partition (kubelet's filesystem: whatever the root has left, 59.8 GiB on
   # 100 GB) can pass kubelet's 85% image garbage-collection threshold during install; kubelet
