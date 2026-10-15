@@ -39,7 +39,7 @@ For just the commands, see [INSTALLCMDS.md](INSTALLCMDS.md).
   localui`) and open node 1 at `https://localhost:5080`, node 2 at `https://127.0.0.1:5081`,
   node 3 at `https://[::1]:5082`.
 - **Link the nodes:** node 1 generates a token; nodes 2 and 3 link to it. Wait for Ready and
-  Synced/Healthy.
+  Synced/Healthy. Or run `./connect.sh link` to do it through the Local UI API.
 - **Create the cluster:** embedded config, OCI Pack Registry password, your **Ubuntu Pro
   token** (Profile Config; enter it now, not after deployment), **VIP = the IP you chose**,
   all three nodes in control-plane-pool, **Deploy Cluster**.
@@ -73,6 +73,7 @@ nodes reach each other and the NLB, and nothing outside the VPC.
   | OpenSSH client (`ssh`) | EICE access: `connect.sh` |
   | Session Manager plugin | `ACCESS_METHOD=ssm`: `connect.sh` |
   | `kubectl` | `./connect.sh kubeconfig`, and kubectl access to the cluster |
+  | `curl`, `jq` | `./connect.sh link` |
 
 - **AWS credentials** allowed to manage EC2, Elastic Load Balancing v2, VPC and, for SSM, IAM
   roles and instance profiles. The scripts confirm them with `sts get-caller-identity` first.
@@ -284,6 +285,19 @@ on its first active boot; reboot it.
    another**, paste, **Confirm**.
 3. Node 3 (`https://[::1]:5082`): the same. Generate a new token if one is rejected.
 4. On node 1, wait until all three show **Ready** and **Synced / Healthy**.
+
+**Or link them from your workstation** through the Local UI API, with no clicking:
+
+```
+./connect.sh link
+```
+
+It signs in to every node as `LOCALUI_USER` (default `fusion`, your user-data user), using
+`LOCALUI_PASSWORD` if set or asking for the password. It then has node 1 generate a fresh link
+token for each other node, links that node, and waits until node 1 lists every node **Ready**,
+**Synced** and **Healthy**. Nodes that are already linked are skipped, so it is safe to run
+again. It opens its own forwards on local ports 15080 and up, so `./connect.sh localui` can stay
+running.
 
 ---
 

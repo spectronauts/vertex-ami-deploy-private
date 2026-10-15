@@ -18,6 +18,7 @@ REGION="us-gov-west-1"            # required
 AMI_ID="<appliance-ami-id>"       # required: the VerteX appliance AMI
 KEY_NAME="<key-pair-name>"        # required: EC2 key pair for SSH to the nodes
 SSH_KEY_FILE="<path-to-key.pem>"  # private key for KEY_NAME, used by connect.sh
+LOCALUI_USER="fusion"             # Local UI user from user-data.yaml, for ./connect.sh link
 ACCESS_METHOD="eice"              # eice | ssm
 NLB_PRIVATE_IP="10.0.11.210"      # the VIP: a free IP in PRIVATE_CIDR
 APP_COUNT=3                       # 1 | 3 nodes
@@ -70,8 +71,16 @@ aws ssm start-session --target <jump-host-id> --document-name AWS-StartPortForwa
 
 ## 7-8. Link the nodes, create the cluster, then the NLB
 
-In Local UI, link nodes 2 and 3 to node 1, then create the cluster with VIP = `NLB_PRIVATE_IP`
-and your Ubuntu Pro token, and click **Deploy Cluster**. Within a minute:
+Link nodes 2 and 3 to node 1, in Local UI or through its API:
+
+```bash
+./connect.sh link                 # signs in as LOCALUI_USER; password from LOCALUI_PASSWORD or asked
+                                  # waits until node 1 shows every node Ready, Synced, Healthy
+                                  # safe to re-run; needs curl and jq
+```
+
+In Local UI, create the cluster with VIP = `NLB_PRIVATE_IP` and your Ubuntu Pro token, and click
+**Deploy Cluster**. Within a minute:
 
 ```bash
 ./deploy.sh                       # creates the NLB on the VIP, target groups and listeners

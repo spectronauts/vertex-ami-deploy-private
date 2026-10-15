@@ -18,6 +18,7 @@ source "$CONFIG"
 : "${DATA_VOLUME_COUNT:=1}" "${DATA_VOLUME_SIZE_GB:=500}"
 : "${USER_DATA_FILE:=user-data.yaml}" "${NODE_TO_NODE:=true}" "${PRESERVE_CLIENT_IP:=false}" "${NLB_PRIVATE_IP:=}"
 : "${ACCESS_METHOD:=eice}" "${JUMP_INSTANCE_TYPE:=t3.micro}" "${SSH_USER:=kairos}" "${SSH_KEY_FILE:=}"
+: "${LOCALUI_USER:=fusion}"
 : "${JUMP_AMI_SSM_PARAM:=/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}"
 
 [[ -n "${REGION:-}" ]] || die "REGION is required in $CONFIG (for example us-gov-west-1)."
@@ -47,7 +48,7 @@ install_hint() {  # tool -> how to install it on this OS and CPU
       aws) echo "brew install awscli  (or https://awscli.amazonaws.com/AWSCLIV2.pkg)" ;;
       session-manager-plugin) echo "brew install --cask session-manager-plugin" ;;
       kubectl) echo "brew install kubectl" ;;
-      ssh|ssh-add|ssh-agent|ssh-keygen) echo "it ships with macOS; check your PATH" ;;
+      ssh|ssh-add|ssh-agent|ssh-keygen|curl) echo "it ships with macOS; check your PATH" ;;
       *) echo "brew install $1" ;;
     esac
     return
@@ -61,6 +62,9 @@ install_hint() {  # tool -> how to install it on this OS and CPU
         echo "sudo dnf install -y $ssm_url/linux_$ssm_arch/session-manager-plugin.rpm  (yum on older releases)"
       fi ;;
     kubectl) echo "curl -fsSLO https://dl.k8s.io/release/\$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/$k8s_arch/kubectl && sudo install kubectl /usr/local/bin/" ;;
+    jq|curl)
+      if command -v apt-get >/dev/null 2>&1; then echo "sudo apt-get install -y $1"
+      else echo "sudo dnf install -y $1"; fi ;;
     ssh|ssh-add|ssh-agent|ssh-keygen)
       if command -v apt-get >/dev/null 2>&1; then echo "sudo apt-get install -y openssh-client"
       else echo "sudo dnf install -y openssh-clients"; fi ;;

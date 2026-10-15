@@ -29,7 +29,7 @@ Deploy Cluster.
 | `user-data.yaml.example` | The airgap guide's user data (`fusion` user); copy to `user-data.yaml`, set password and key |
 | `create-vpc.sh` | VPC and one private subnet; refuses any internet gateway or default route |
 | `deploy.sh` | Security groups, the access path, the nodes, and (without `--no-nlb`) the NLB on the VIP |
-| `connect.sh` | `localui`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
+| `connect.sh` | `localui`, `link`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
 | `status.sh` | Instances, access path, NLB and target health |
 | `teardown.sh` | Deletes everything, VPC and IAM role included; `--nlb-only` deletes just the NLB |
 

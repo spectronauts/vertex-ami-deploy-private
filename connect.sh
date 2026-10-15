@@ -3,6 +3,8 @@
 #
 # Usage: ./connect.sh [-c config.env] <command>
 #   localui      forward every node's Local UI: node N -> https://localhost:<5079+N>
+#   link         link nodes 2..N to node 1 through the Local UI API, no clicking; signs in
+#                as LOCALUI_USER with LOCALUI_PASSWORD (asked for if unset); needs curl, jq
 #   ssh [N]      shell on node N (default 1) as SSH_USER
 #   api          forward the VIP's Kubernetes API to https://localhost:6443 (for kubectl)
 #   kubeconfig [file]  copy node 1's admin kubeconfig, pointed at the api forward
@@ -22,8 +24,8 @@ cd "$(dirname "$0")"
 # shellcheck source=lib.sh
 source ./lib.sh
 case "$CMD" in
-  nodes|localui|ssh|api|kubeconfig) require_aws ;;
-  *) sed -n '2,17p' "$0"; exit 2 ;;
+  nodes|localui|link|ssh|api|kubeconfig) require_aws ;;
+  *) sed -n '2,19p' "$0"; exit 2 ;;
 esac
 
 # shellcheck disable=SC2207
@@ -34,10 +36,14 @@ need_key() {
   require_tools ssh
   [[ -n "$SSH_KEY_FILE" && -f "$SSH_KEY_FILE" ]] || die "Set SSH_KEY_FILE in $CONFIG to the private key for $KEY_NAME."
 }
-eice_ssh() {  # extra ssh options... -> ssh to node 1 through the endpoint
+eice_opts() {  # sets EICE_OPTS: the ssh options that reach a node through the endpoint
   need_key
-  ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 \
-      -o ProxyCommand="aws ec2-instance-connect open-tunnel --region $REGION --instance-id %h" "$@"
+  EICE_OPTS=(-i "$SSH_KEY_FILE" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30
+             -o ProxyCommand="aws ec2-instance-connect open-tunnel --region $REGION --instance-id %h")
+}
+eice_ssh() {  # extra ssh options... -> ssh to a node through the endpoint
+  eice_opts
+  ssh "${EICE_OPTS[@]}" "$@"
 }
 ssm_forward() {  # remote-host remote-port local-port  (runs in the background)
   local jump
@@ -50,6 +56,90 @@ wait_port() {  # local-port: wait until something listens on it
   local i
   for i in $(seq 1 30); do port_open localhost "$1" && return 0; sleep 1; done
   die "Nothing listening on localhost:$1 after 30 seconds."
+}
+
+# --- Local UI API: the calls Local UI's own pages make, on a node's port 5080 ------------------
+LINK_API=/v1/edge-mgmt/edgehosts/current/link
+ui_api() {  # local-port method path [json-body] -> response body; AUTH (a login JWT) from the environment
+  # Returns 4 on HTTP 404 (quietly) and 1 on any other failure. The body goes on stdin, so a
+  # password in it never shows in the process list.
+  local port=$1 method=$2 path=$3 body=${4:-} out code
+  local args=(-sk -X "$method" -H 'Content-Type: application/json' -w '\n%{http_code}')
+  if [[ -n "${AUTH:-}" ]]; then args+=(-H "Authorization: $AUTH"); fi
+  if [[ -n "$body" ]]; then
+    out=$(curl "${args[@]}" --data-binary @- "https://localhost:$port$path" <<<"$body") || return 1
+  else
+    out=$(curl "${args[@]}" "https://localhost:$port$path") || return 1
+  fi
+  code=${out##*$'\n'}; out=${out%$'\n'*}
+  if [[ "$code" == 404 ]]; then return 4; fi
+  if [[ ! "$code" =~ ^2 ]]; then
+    warn "$method $path: HTTP $code $(jq -r '.message // empty' <<<"$out" 2>/dev/null || true)"
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+ui_login() {  # local-port -> a login JWT for LOCALUI_USER, password in LOCALUI_PASS
+  local body
+  body=$(LOCALUI_USER="$LOCALUI_USER" LOCALUI_PASS="$LOCALUI_PASS" \
+         jq -cn '{username: env.LOCALUI_USER, password: env.LOCALUI_PASS}')
+  AUTH="" ui_api "$1" POST '/v1/users/default/login?extendedSession=true' "$body" | jq -r '.Token.Authorization // empty'
+}
+link_nodes() {  # base-port node-count: node N's Local UI is forwarded to localhost:<base-port + N - 1>
+  local base=$1 n=$2 i p t st res lt try rows last="" ready total missing ip
+  local tok=()
+  for ((i = 0; i < n; i++)); do
+    t=""
+    for try in 1 2 3; do
+      t=$(ui_login $((base + i))) || t=""
+      [[ -n "$t" ]] && break
+      sleep 5
+    done
+    [[ -n "$t" ]] || die "Could not sign in to Local UI on node $((i + 1)) as $LOCALUI_USER (wrong password, or Local UI not up yet: it starts 25-30 minutes after launch)."
+    tok+=("$t")
+  done
+  ok "Signed in to Local UI on all $n nodes as $LOCALUI_USER"
+
+  for ((i = 1; i < n; i++)); do
+    p=$((base + i))
+    st=$(AUTH=${tok[$i]} ui_api "$p" GET "$LINK_API/status" | jq -r '.status // empty') || st=""
+    if [[ "$st" == Completed ]]; then ok "Node $((i + 1)) is already linked"; continue; fi
+    # A link token holds node 1's IP and a one-time password that lasts two minutes: get a fresh one.
+    lt=$(AUTH=${tok[0]} ui_api "$base" POST "$LINK_API/generate-token" | jq -r '.token // empty') || lt=""
+    [[ -n "$lt" ]] || die "Node 1 did not return a link token."
+    AUTH=${tok[$i]} ui_api "$p" POST "$LINK_API" "$(jq -cn --arg t "$lt" '{token: $t}')" >/dev/null \
+      || die "Node $((i + 1)) did not accept node 1's link token."
+    for try in $(seq 1 60); do
+      res=$(AUTH=${tok[$i]} ui_api "$p" GET "$LINK_API/status") || res='{}'
+      st=$(jq -r '.status // empty' <<<"$res")
+      case "$st" in
+        Completed) ok "Node $((i + 1)) linked to node 1"; break ;;
+        Failed) die "Linking node $((i + 1)) failed: $(jq -r '.errorMessage // "no message"' <<<"$res")" ;;
+      esac
+      sleep 5
+    done
+    [[ "$st" == Completed ]] || die "Node $((i + 1)) link still ${st:-pending} after 5 minutes."
+  done
+
+  log "Waiting for node 1 to show every node Ready, Synced and Healthy (IP, status, content, health)"
+  for try in $(seq 1 120); do
+    res=$(AUTH=${tok[0]} ui_api "$base" GET "$LINK_API/status") || res='{}'
+    rows=$(jq -r '.peers[]? | "    \(.ip // "?")  \(.status // "-")  \(.contentSyncStatus // "-")  \(.health.status // "-")"' <<<"$res")
+    if [[ -n "$rows" && "$rows" != "$last" ]]; then echo "$rows"; last=$rows; fi
+    missing=0
+    for ((i = 1; i < n; i++)); do
+      ip=${IPS[$i]}
+      jq -e --arg ip "$ip" '[.peers[]? | select(.ip == $ip)] | length > 0' <<<"$res" >/dev/null || missing=1
+    done
+    total=$(jq '[.peers[]?] | length' <<<"$res")
+    ready=$(jq '[.peers[]? | select(.status == "Ready" and .health.status == "Healthy"
+                   and ((.contentSyncStatus // "") | ascii_downcase) == "synced")] | length' <<<"$res")
+    if [[ $missing -eq 0 && $total -gt 0 && $ready -eq $total ]]; then
+      ok "All $n nodes are linked: Ready, Synced and Healthy"; return 0
+    fi
+    sleep 5
+  done
+  die "After 10 minutes not every node is Ready, Synced and Healthy; check Linked Edge Hosts in Local UI on node 1."
 }
 
 case "$CMD" in
@@ -79,6 +169,28 @@ case "$CMD" in
       echo "Forwarding through the jump host; Ctrl-C to stop."
       wait
     fi ;;
+
+  link)
+    # Link nodes 2..N to node 1 the way Local UI's Linked Edge Hosts page does, then wait until
+    # node 1 lists every node Ready, Synced and Healthy. Safe to re-run: linked nodes are skipped.
+    [[ ${#IDS[@]} -ge 2 ]] || die "Linking needs at least two nodes."
+    require_tools curl jq
+    LOCALUI_PASS="${LOCALUI_PASSWORD:-}"
+    if [[ -z "$LOCALUI_PASS" ]]; then read -r -s -p "Local UI password for $LOCALUI_USER: " LOCALUI_PASS; echo; fi
+    [[ -n "$LOCALUI_PASS" ]] || die "No Local UI password given."
+    base=15080   # local ports clear of ./connect.sh localui's, so both can run at once
+    trap 'kill $(jobs -p) 2>/dev/null' EXIT
+    if [[ "$ACCESS_METHOD" == "eice" ]]; then
+      fwd=(-L "$base:localhost:5080")
+      for ((i = 1; i < ${#IPS[@]}; i++)); do fwd+=(-L "$((base + i)):${IPS[$i]}:5080"); done
+      eice_opts
+      ssh "${EICE_OPTS[@]}" -N -o ExitOnForwardFailure=yes "${fwd[@]}" "$SSH_USER@${IDS[0]}" &
+    else
+      for i in "${!IPS[@]}"; do ssm_forward "${IPS[$i]}" 5080 "$((base + i))"; done
+    fi
+    for i in "${!IPS[@]}"; do wait_port "$((base + i))"; done
+    log "Linking nodes 2-${#IDS[@]} to node 1 (${IPS[0]}) through the Local UI API"
+    link_nodes "$base" "${#IPS[@]}" ;;
 
   ssh)
     [[ "$ARG" =~ ^[0-9]+$ && $ARG -ge 1 && $ARG -le ${#IDS[@]} ]] || die "Node must be 1-${#IDS[@]}."
@@ -123,5 +235,5 @@ case "$CMD" in
       ssm_forward "$NLB_PRIVATE_IP" 6443 6443; wait
     fi ;;
 
-  *) sed -n '2,17p' "$0"; exit 2 ;;
+  *) sed -n '2,19p' "$0"; exit 2 ;;
 esac
