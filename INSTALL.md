@@ -217,6 +217,23 @@ stages:
       name: "create admin user"
 ```
 
+**The SSH public key** for `ssh_authorized_keys` is one line starting `ssh-rsa AAAA`. To use
+your EC2 key pair, so the same key signs in as `kairos` and as your user, print its public
+key:
+
+```
+ssh-keygen -y -f <key>.pem
+```
+
+Or create a separate key and use the contents of its `.pub` file:
+
+```
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/vertex-ui -C "you@example.com"
+cat ~/.ssh/vertex-ui.pub
+```
+
+Use an RSA key, and keep it on one line; a line break inside the key stops it from working.
+
 User data accounts exist from the second boot on (after the reset). Anyone who can read the
 instance's user data can read the password; use a strong one.
 

@@ -8,6 +8,7 @@ directory. Every script also takes `-c <file>` to use a config other than `confi
 ```bash
 cp config.env.example config.env
 cp user-data.yaml.example user-data.yaml    # set the Local UI password and your SSH public key
+ssh-keygen -y -f <key>.pem                  # prints the public key for ssh_authorized_keys (one line)
 ```
 
 Settings in `config.env`:
