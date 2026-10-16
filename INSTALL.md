@@ -364,10 +364,27 @@ Observed on 2026-10-09 (Deploy Cluster at about 13:57 UTC, NLB created within a 
 
 Follow progress with `./connect.sh ssh 1` and `sudo journalctl -u stylus-agent -f`. Pulls from
 `<VIP>:30003` fail with "connection refused" or "not found" until the registry is up and loaded,
-then clear. `./status.sh --watch` shows the NLB state and each port's target health live,
-with the elapsed time, until every port is healthy on every node (`./status.sh` alone prints
-a snapshot). `./deploy.sh` likewise shows the NLB's state and elapsed time while it
-provisions, usually 2-5 minutes.
+then clear. `./deploy.sh` shows the NLB's state and elapsed time while it provisions, usually
+2-5 minutes. Then run:
+
+```
+./status.sh --watch
+```
+
+It shows the NLB state and each port's target health live, with the elapsed time, until every
+port is healthy on every node (`./status.sh` alone prints a snapshot). It also watches the
+install on node 1 through node 1's Kubernetes API, and repairs two known install failures if
+they occur (Troubleshooting has both):
+
+| Failure | Repaired when | Repair |
+| --- | --- | --- |
+| Storage: no LINSTOR storage classes, because the `piraeus-cluster` chart lost a race with cert-manager | It has lasted 5 minutes | Hand `custom-loader-image` to the chart's Helm release, delete the `piraeus-operator` pack record (re-created automatically), restart `stylus-operator` on node 1 |
+| MongoDB: `mongo.key` empty while `mongo-0` waits in `Init` | It has lasted 3 minutes | Set a new random key |
+
+A normal install in progress is never changed, and each repair runs at most twice. The
+checks need `SSH_KEY_FILE`, `kubectl` and `jq`. Each step is in the run log, and the
+changed objects are backed up next to it first. `--no-repair` reports the failures without
+changing anything.
 
 ---
 
@@ -417,13 +434,28 @@ clusters:
 | "VIP address is already assigned to a device on the network" | The NLB (or its interface, about a minute after deletion) owns the IP | `./teardown.sh --nlb-only`, wait, create the cluster, then `./deploy.sh` |
 | `dial tcp <VIP>:6443: no route to host` | NLB not created yet | `./deploy.sh` |
 | Node connections to the VIP hang | Client IP preservation on | `preserve_client_ip.enabled=false` on the target groups |
-| `mongo-0` stuck in `Init:0/1`, "mongo.key is empty"; configserver crash-looping | Helm re-applies the MongoDB key secret empty during install | Set the key (below) |
+| `zot-pvc` Pending, 30003 never healthy; no `linstor-*` storage classes; `stylus-operator` logs `invalid ownership metadata` for `LinstorSatelliteConfiguration "custom-loader-image"` | The `piraeus-cluster` chart was installed before cert-manager was ready and failed; the satellite configuration was then created outside Helm, every retry failed on it, and the retries stopped | `./status.sh --watch` repairs it; or by hand (below) |
+| `mongo-0` stuck in `Init:0/1`, "mongo.key is empty"; configserver crash-looping | Helm re-applies the MongoDB key secret empty during install | `./status.sh --watch` repairs it; or set the key (below) |
 | A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume too small); the node can't pull them back | Redeploy with root volumes of at least 300 GB (Step 5) |
 
 **Logs.** Each script run writes a log in `logs/` and prints its path when it starts, and
 again if it fails. The log records every AWS call with its full error, every Local UI API
 call, and the command that stopped the run. Passwords and tokens appear as `<redacted>`.
 Start there when a step fails, and include the log when you ask for help.
+
+**Repair storage by hand:** let the chart's Helm release adopt the satellite configuration,
+delete the pack record so it is re-created, then restart `stylus-operator` on node 1. The pack
+record is in the `cluster-<id>` namespace (`kubectl get packs -A | grep piraeus`).
+
+```
+kubectl label linstorsatelliteconfiguration custom-loader-image app.kubernetes.io/managed-by=Helm --overwrite
+kubectl annotate linstorsatelliteconfiguration custom-loader-image --overwrite \
+  meta.helm.sh/release-name=piraeusoperator-piraeus-cluster meta.helm.sh/release-namespace=piraeus-system
+kubectl -n cluster-<id> delete pack piraeus-operator
+./connect.sh ssh 1        # then: sudo systemctl restart stylus-operator
+```
+
+The `linstor-*` storage classes appear within a few minutes, then `zot-pvc` binds.
 
 **Set the MongoDB key:**
 

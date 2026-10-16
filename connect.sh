@@ -34,51 +34,6 @@ require_aws
 IDS=($(node_ids)); IPS=($(node_ips))
 [[ ${#IDS[@]} -gt 0 ]] || die "No running nodes for $NAME_PREFIX."
 
-need_key() {
-  require_tools ssh
-  [[ -n "$SSH_KEY_FILE" ]] || die "Set SSH_KEY_FILE in $CONFIG to the private key for $KEY_NAME."
-  [[ -f "$SSH_KEY_FILE" ]] || die "SSH_KEY_FILE in $CONFIG points to $SSH_KEY_FILE, which doesn't exist."
-  logf DEBUG "SSH key $SSH_KEY_FILE: $(ssh_key_info "$SSH_KEY_FILE")"
-}
-eice_opts() {  # sets EICE_OPTS: the ssh options that reach a node through the endpoint
-  need_key
-  EICE_OPTS=(-i "$SSH_KEY_FILE" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30
-             -o ProxyCommand="aws ec2-instance-connect open-tunnel --region $REGION --instance-id %h")
-}
-eice_ssh() {  # extra ssh options... -> ssh to a node through the endpoint (logged with its exit code)
-  local rc=0 t0
-  eice_opts
-  logf INFO "ssh $(_quote_args "${EICE_OPTS[@]}" "$@")"
-  t0=$(_clock)
-  ssh "${EICE_OPTS[@]}" "$@" || rc=$?
-  logf INFO "ssh exited $rc after $(_took "$t0")"
-  return $rc
-}
-ssm_forward() {  # remote-host remote-port local-port  (runs in the background; output in the run log)
-  # Errors also show on the console unless SSM_QUIET=true (link draws progress lines instead).
-  local jump bg
-  require_tools session-manager-plugin
-  jump=$(instance_id jump); [[ -n "$jump" ]] || die "No jump host for $NAME_PREFIX (ACCESS_METHOD=ssm)."
-  bg="$_LOG_TMP/ssm-localhost-$3.bg"
-  if [[ "${SSM_QUIET:-}" == "true" ]]; then
-    command aws ssm start-session --target "$jump" --document-name AWS-StartPortForwardingSessionToRemoteHost \
-        --parameters "{\"host\":[\"$1\"],\"portNumber\":[\"$2\"],\"localPortNumber\":[\"$3\"]}" >"$bg" 2>&1 &
-  else
-    command aws ssm start-session --target "$jump" --document-name AWS-StartPortForwardingSessionToRemoteHost \
-        --parameters "{\"host\":[\"$1\"],\"portNumber\":[\"$2\"],\"localPortNumber\":[\"$3\"]}" >>"$bg" 2> >(tee -a "$bg" >&2) &
-  fi
-  logf INFO "SSM port forward localhost:$3 -> $1:$2 through jump host $jump (pid $!)"
-}
-wait_port() {  # local-port [process-output-file]: wait until something listens on it
-  local i
-  for i in $(seq 1 30); do
-    if port_open localhost "$1"; then logf DEBUG "localhost:$1 is listening (after ${i}s)"; return 0; fi
-    sleep 1
-  done
-  if [[ -s "${2:-}" ]]; then warn "Forward output: $(tail -3 "$2" | tr '\n' ' ')"; fi
-  die "Nothing listening on localhost:$1 after 30 seconds."
-}
-
 # --- Local UI API: the calls Local UI's own pages make, on a node's port 5080 ------------------
 LINK_API=/v1/edge-mgmt/edgehosts/current/link
 ui_api() {  # local-port method path [json-body] -> response body; AUTH (a login JWT) from the environment

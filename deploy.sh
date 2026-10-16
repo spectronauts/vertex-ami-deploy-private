@@ -426,11 +426,17 @@ summary() {
     ./connect.sh ssh 1          shell on node 1
     ./connect.sh api            forwards the VIP's 6443 for kubectl
 EOF
-  [[ "$NO_NLB" == "true" ]] && cat <<EOF
+  if [[ "$NO_NLB" == "true" ]]; then cat <<EOF
 
   Next: link the nodes, create the cluster with VIP $NLB_PRIVATE_IP, click Deploy Cluster,
   then run ./deploy.sh to create the NLB on that IP.
 EOF
+  else cat <<EOF
+
+  Next: ./status.sh --watch    follows the NLB, each port and the install on node 1 until
+                               every port is healthy; repairs two known install failures
+EOF
+  fi
   echo
 }
 

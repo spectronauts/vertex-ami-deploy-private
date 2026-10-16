@@ -86,8 +86,11 @@ In Local UI, create the cluster with VIP = `NLB_PRIVATE_IP` and your Ubuntu Pro 
 ```bash
 ./deploy.sh                       # creates the NLB on the VIP, target groups and listeners
 ./status.sh --watch               # live: NLB state and each port's health with elapsed time,
-                                  # until all are healthy (6443, then 30003, then 443)
+                                  # until all are healthy (6443, then 30003, then 443); also
+                                  # watches the install on node 1 and repairs the storage and
+                                  # MongoDB key failures (Troubleshooting) if they occur
                                   # options: -c <file>  --watch (without it: a snapshot)
+                                  #          --no-repair (with --watch: report, don't change)
 ./connect.sh ssh 1                # options: ssh [N], N = node number (default 1)
 sudo journalctl -u stylus-agent -f    # on the node: follow the install
 ```
@@ -154,7 +157,20 @@ Node status check stays "impaired" after its reset:
 aws ec2 reboot-instances --instance-ids <node-instance-id>
 ```
 
-`mongo-0` stuck in `Init:0/1` with "mongo.key is empty":
+`zot-pvc` Pending and no `linstor-*` storage classes, with `invalid ownership metadata` for
+`custom-loader-image` in the `stylus-operator` log (`./status.sh --watch` repairs this):
+
+```bash
+kubectl get packs -A | grep piraeus          # the namespace is cluster-<id>
+kubectl label linstorsatelliteconfiguration custom-loader-image app.kubernetes.io/managed-by=Helm --overwrite
+kubectl annotate linstorsatelliteconfiguration custom-loader-image --overwrite \
+  meta.helm.sh/release-name=piraeusoperator-piraeus-cluster meta.helm.sh/release-namespace=piraeus-system
+kubectl -n cluster-<id> delete pack piraeus-operator
+./connect.sh ssh 1                           # then on node 1:
+sudo systemctl restart stylus-operator
+```
+
+`mongo-0` stuck in `Init:0/1` with "mongo.key is empty" (`./status.sh --watch` repairs this):
 
 ```bash
 kubectl -n hubble-system patch secret spectro-mongodb-replicaset-key --type merge \

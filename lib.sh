@@ -23,6 +23,7 @@ _redact() {  # stdin -> stdout with secrets masked
     -e 's/([Aa]uthorization:[[:space:]]*)[^[:space:]]+/\1<redacted>/g' \
     -e 's/eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/<redacted-jwt>/g' \
     -e 's/(passwd:[[:space:]]*).+/\1<redacted>/' \
+    -e 's/(mongo\.key"?[[:space:]]*:[[:space:]]*)"?[A-Za-z0-9+\/=]{16,}"?/\1<redacted>/g' \
     -e 's/(aws_secret_access_key|aws_session_token)([[:space:]]*=[[:space:]]*).+/\1\2<redacted>/'
 }
 _log_where() {  # the calling function chain, without the logging helpers
@@ -344,4 +345,50 @@ node_ips() {  # node private IPs in node-1..N order
   aws_q ec2 describe-instances --filters "Name=tag:$TAG_KEY,Values=$NAME_PREFIX" "Name=tag:Name,Values=${NAME_PREFIX}-node-*" \
       "Name=instance-state-name,Values=pending,running" \
       --query 'sort_by(Reservations[].Instances[], &join(`,`, Tags[?Key==`Name`].Value))[].PrivateIpAddress' | tr '\t' ' '
+}
+
+# --- Reaching the nodes: ssh through the EC2 Instance Connect Endpoint, or SSM port forwards ---
+need_key() {
+  require_tools ssh
+  [[ -n "$SSH_KEY_FILE" ]] || die "Set SSH_KEY_FILE in $CONFIG to the private key for $KEY_NAME."
+  [[ -f "$SSH_KEY_FILE" ]] || die "SSH_KEY_FILE in $CONFIG points to $SSH_KEY_FILE, which doesn't exist."
+  logf DEBUG "SSH key $SSH_KEY_FILE: $(ssh_key_info "$SSH_KEY_FILE")"
+}
+eice_opts() {  # sets EICE_OPTS: the ssh options that reach a node through the endpoint
+  need_key
+  EICE_OPTS=(-i "$SSH_KEY_FILE" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30
+             -o ProxyCommand="aws ec2-instance-connect open-tunnel --region $REGION --instance-id %h")
+}
+eice_ssh() {  # extra ssh options... -> ssh to a node through the endpoint (logged with its exit code)
+  local rc=0 t0
+  eice_opts
+  logf INFO "ssh $(_quote_args "${EICE_OPTS[@]}" "$@")"
+  t0=$(_clock)
+  ssh "${EICE_OPTS[@]}" "$@" || rc=$?
+  logf INFO "ssh exited $rc after $(_took "$t0")"
+  return $rc
+}
+ssm_forward() {  # remote-host remote-port local-port  (runs in the background; output in the run log)
+  # Errors also show on the console unless SSM_QUIET=true (link draws progress lines instead).
+  local jump bg
+  require_tools session-manager-plugin
+  jump=$(instance_id jump); [[ -n "$jump" ]] || die "No jump host for $NAME_PREFIX (ACCESS_METHOD=ssm)."
+  bg="$_LOG_TMP/ssm-localhost-$3.bg"
+  if [[ "${SSM_QUIET:-}" == "true" ]]; then
+    command aws ssm start-session --target "$jump" --document-name AWS-StartPortForwardingSessionToRemoteHost \
+        --parameters "{\"host\":[\"$1\"],\"portNumber\":[\"$2\"],\"localPortNumber\":[\"$3\"]}" >"$bg" 2>&1 &
+  else
+    command aws ssm start-session --target "$jump" --document-name AWS-StartPortForwardingSessionToRemoteHost \
+        --parameters "{\"host\":[\"$1\"],\"portNumber\":[\"$2\"],\"localPortNumber\":[\"$3\"]}" >>"$bg" 2> >(tee -a "$bg" >&2) &
+  fi
+  logf INFO "SSM port forward localhost:$3 -> $1:$2 through jump host $jump (pid $!)"
+}
+wait_port() {  # local-port [process-output-file]: wait until something listens on it
+  local i
+  for i in $(seq 1 30); do
+    if port_open localhost "$1"; then logf DEBUG "localhost:$1 is listening (after ${i}s)"; return 0; fi
+    sleep 1
+  done
+  if [[ -s "${2:-}" ]]; then warn "Forward output: $(tail -3 "$2" | tr '\n' ' ')"; fi
+  die "Nothing listening on localhost:$1 after 30 seconds."
 }
