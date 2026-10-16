@@ -146,12 +146,75 @@ check_system_env() {
   esac
   if [[ -z "${TENANT_ORG_NAME:-}" && -n "${TENANT_SSO:-}${TENANT_SESSION_MINUTES:-}${TENANT_PASSWORD_MIN_LENGTH:-}" ]]; then
     problem "Tenant settings are set but TENANT_ORG_NAME is empty."; fi
+  local why
+  if [[ -n "${SYSTEM_ADMIN_NEW_PASSWORD:-}" && "$SYSTEM_ADMIN_NEW_PASSWORD" != "${SYSTEM_ADMIN_PASSWORD:-}" ]]; then
+    password_rules SYSTEM; why=$(password_problems "$SYSTEM_ADMIN_NEW_PASSWORD" "${SYSTEM_ADMIN_PASSWORD:-}")
+    if [[ -n "$why" ]]; then problem "SYSTEM_ADMIN_NEW_PASSWORD doesn't meet VerteX's password rules ($(rules_text)); it needs: $why."; fi
+  fi
+  if [[ -n "${TENANT_ADMIN_PASSWORD:-}" ]]; then
+    password_rules TENANT; why=$(password_problems "$TENANT_ADMIN_PASSWORD")
+    if [[ -n "$why" ]]; then problem "TENANT_ADMIN_PASSWORD doesn't meet VerteX's password rules ($(rules_text)); it needs: $why."; fi
+  fi
   local p
   for p in ${PROBLEMS[@]+"${PROBLEMS[@]}"}; do warn "$p"; done
   [[ ${#PROBLEMS[@]} -eq 0 ]] || die "Fix the settings above in $SYSTEM_ENV, then re-run. Nothing was changed."
   ok "Settings in $SYSTEM_ENV"
 }
 
+# VerteX's default password policy ("password should be of minimum length 14 and less than maximum
+# length 64 with minimum number of 1 block letter(s), 1 small letter(s), 1 digit(s), 1 special
+# character(s)"), made stricter by any rules system.env sets; replaced by VerteX's own policy
+# when it can be read.
+PW_MIN=14; PW_MAX=64; PW_UPPER=1; PW_LOWER=1; PW_DIGITS=1; PW_SPECIAL=1
+password_rules() {  # SYSTEM|TENANT: set PW_* to the default rules, made stricter by that scope's settings
+  local s=$1 v
+  PW_MIN=14; PW_MAX=64; PW_UPPER=1; PW_LOWER=1; PW_DIGITS=1; PW_SPECIAL=1
+  v="${s}_PASSWORD_MIN_LENGTH"; if [[ "${!v:-}" =~ ^[0-9]+$ ]] && (( ${!v} > PW_MIN )); then PW_MIN=${!v}; fi
+  v="${s}_PASSWORD_MAX_LENGTH"; if [[ "${!v:-}" =~ ^[0-9]+$ ]] && (( ${!v} < PW_MAX )); then PW_MAX=${!v}; fi
+  v="${s}_PASSWORD_MIN_UPPERCASE"; if [[ "${!v:-}" =~ ^[0-9]+$ ]] && (( ${!v} > PW_UPPER )); then PW_UPPER=${!v}; fi
+  v="${s}_PASSWORD_MIN_LOWERCASE"; if [[ "${!v:-}" =~ ^[0-9]+$ ]] && (( ${!v} > PW_LOWER )); then PW_LOWER=${!v}; fi
+  v="${s}_PASSWORD_MIN_DIGITS"; if [[ "${!v:-}" =~ ^[0-9]+$ ]] && (( ${!v} > PW_DIGITS )); then PW_DIGITS=${!v}; fi
+  v="${s}_PASSWORD_MIN_SPECIAL"; if [[ "${!v:-}" =~ ^[0-9]+$ ]] && (( ${!v} > PW_SPECIAL )); then PW_SPECIAL=${!v}; fi
+  return 0
+}
+password_rules_from_api() {  # policy-json: use VerteX's own policy where it has a value
+  local k v
+  for k in minLength:PW_MIN maxLength:PW_MAX minNumOfBlockLetters:PW_UPPER minNumOfSmallLetters:PW_LOWER \
+           minNumOfDigits:PW_DIGITS minNumOfSpecialCharacters:PW_SPECIAL; do
+    v=$(jq -r --arg k "${k%%:*}" '.[$k] // empty' <<<"$1" 2>/dev/null) || v=""
+    if [[ "$v" =~ ^[0-9]+$ ]] && (( v > 0 )); then printf -v "${k#*:}" '%s' "$v"; fi
+  done
+  logf INFO "Password rules from VerteX: $PW_MIN-$PW_MAX characters, $PW_UPPER uppercase, $PW_LOWER lowercase, $PW_DIGITS digit(s), $PW_SPECIAL special"
+}
+rules_text() { printf '%s to %s characters, with at least %s uppercase, %s lowercase, %s digit and %s special character' \
+  "$PW_MIN" "$PW_MAX" "$PW_UPPER" "$PW_LOWER" "$PW_DIGITS" "$PW_SPECIAL"; }
+password_problems() {  # password [current-password]: what it lacks against PW_*, empty if nothing (never prints it)
+  local p=$1 bytes alnum n out=""
+  bytes=$(printf '%s' "$p" | LC_ALL=C wc -c | tr -d ' ')
+  alnum=$(printf '%s' "$p" | LC_ALL=C tr -cd 'A-Za-z0-9' | wc -c | tr -d ' ')
+  if (( bytes < PW_MIN || bytes > PW_MAX )); then out+="${out:+, }$PW_MIN to $PW_MAX characters (it has $bytes)"; fi
+  n=$(printf '%s' "$p" | LC_ALL=C tr -cd 'A-Z' | wc -c | tr -d ' '); (( n >= PW_UPPER )) || out+="${out:+, }$PW_UPPER uppercase letter(s)"
+  n=$(printf '%s' "$p" | LC_ALL=C tr -cd 'a-z' | wc -c | tr -d ' '); (( n >= PW_LOWER )) || out+="${out:+, }$PW_LOWER lowercase letter(s)"
+  n=$(printf '%s' "$p" | LC_ALL=C tr -cd '0-9' | wc -c | tr -d ' '); (( n >= PW_DIGITS )) || out+="${out:+, }$PW_DIGITS digit(s)"
+  (( bytes - alnum >= PW_SPECIAL )) || out+="${out:+, }$PW_SPECIAL special character(s)"
+  if [[ -n "${2:-}" && "$p" == "$2" ]]; then out+="${out:+, }a value different from the current password"; fi
+  printf '%s' "$out"
+}
+ask_new_password() {  # variable prompt [current-password]: ask until the password meets PW_* (3 tries)
+  local v=$1 try p again why
+  [[ -z "${!v:-}" ]] || return 0
+  [[ -t 0 ]] || die "$v is empty and there is no terminal to ask for it; set it in $SYSTEM_ENV."
+  echo "  VerteX's password rules: $(rules_text); not the current password." >&2
+  for try in 1 2 3; do
+    read -r -s -p "$2: " p; echo >&2
+    why=$(password_problems "$p" "${3:-}")
+    if [[ -n "$why" ]]; then echo "  That password needs: $why." >&2; continue; fi
+    read -r -s -p "Again: " again; echo >&2
+    if [[ "$p" != "$again" ]]; then echo "  The two entries differ." >&2; continue; fi
+    printf -v "$v" '%s' "$p"; return 0
+  done
+  die "No password that meets VerteX's rules after 3 tries."
+}
 ask_secret() {  # variable prompt: read a password into the variable if it is empty (twice for a new one)
   local v=$1 again=""
   [[ -z "${!v:-}" ]] || return 0
@@ -276,7 +339,11 @@ sign_in() {
   if [[ "$PASSWORD_IS_SET" != true || "$SYSTEM_ADMIN_PASSWORD" == admin || -n "${SYSTEM_ADMIN_NEW_PASSWORD:-}" ]]; then
     logf INFO "Setting the system admin password (first login: $([[ "$PASSWORD_IS_SET" != true ]] && echo yes || echo "not flagged"))"
     if [[ -z "${SYSTEM_ADMIN_NEW_PASSWORD:-}" ]]; then typed=1; fi
-    ask_secret SYSTEM_ADMIN_NEW_PASSWORD "New password for the system admin $SYSTEM_ADMIN_USERNAME" confirm
+    password_rules SYSTEM
+    if api GET /v1/system/password/policy/default; then password_rules_from_api "$API_BODY"; fi
+    ask_new_password SYSTEM_ADMIN_NEW_PASSWORD "New password for the system admin $SYSTEM_ADMIN_USERNAME" "$SYSTEM_ADMIN_PASSWORD"
+    local why; why=$(password_problems "$SYSTEM_ADMIN_NEW_PASSWORD" "$SYSTEM_ADMIN_PASSWORD")
+    [[ -z "$why" ]] || die "SYSTEM_ADMIN_NEW_PASSWORD doesn't meet VerteX's password rules ($(rules_text)); it needs: $why."
     [[ "$SYSTEM_ADMIN_NEW_PASSWORD" != "$SYSTEM_ADMIN_PASSWORD" ]] || die "SYSTEM_ADMIN_NEW_PASSWORD must differ from SYSTEM_ADMIN_PASSWORD."
     if [[ "$DRY_RUN" == true ]]; then printf '  - Set the admin password and email (dry run: not changed)\n'; return 0; fi
     local body
