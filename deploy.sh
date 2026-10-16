@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the VerteX appliance into the private-only network from create-vpc.sh:
+# Deploy the VerteX appliance into the private-only network from create-aws-infra.sh:
 #   security groups  access, app and NLB groups referencing each other by ID; default
 #                    allow-all egress removed; nodes may talk to each other
 #   access           ACCESS_METHOD=eice: an EC2 Instance Connect Endpoint in the subnet
@@ -91,7 +91,8 @@ preflight() {
   ok "User data $USER_DATA_FILE"
 
   VPC_ID=$(vpc_id); PRIVATE_ID=$(subnet_id private)
-  [[ -n "$VPC_ID" && -n "$PRIVATE_ID" ]] || die "Network not found. Run ./create-vpc.sh first."
+  [[ -n "$VPC_ID" && -n "$PRIVATE_ID" ]] \
+    || die "Network not found. Run ./create-aws-infra.sh first."
   AZ=$(aws_q ec2 describe-subnets --subnet-ids "$PRIVATE_ID" --query 'Subnets[0].AvailabilityZone')
   [[ "$(aws_q ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" \
       --query "RouteTables[].Routes[?DestinationCidrBlock=='0.0.0.0/0'][] | length(@)")" == "0" ]] \

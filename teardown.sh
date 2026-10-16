@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove everything create-vpc.sh and deploy.sh built for one NAME_PREFIX: NLB and target
+# Remove everything create-aws-infra.sh and deploy.sh built for one NAME_PREFIX: NLB and target
 # groups, instances, the access path (EC2 Instance Connect Endpoint, or SSM endpoints and
 # the jump host's IAM role), route table, subnet, security groups, VPC. Asks first.
 #

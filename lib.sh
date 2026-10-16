@@ -213,9 +213,9 @@ aws_q() { aws "$@" --output text 2>/dev/null; }
 none_to_empty() { [[ "$1" == "None" ]] && echo "" || echo "$1"; }
 
 # --- Settings check: every script, before anything else; no AWS calls ---------------------------
-# Names any setting no script can use; create-vpc.sh and deploy.sh stop on them (CONFIG_PROBLEMS),
-# the others carry on so a bad edit never blocks ./teardown.sh. Values allowed but known to break
-# the install get a warning only.
+# Names any setting no script can use; create-aws-infra.sh and deploy.sh stop on them
+# (CONFIG_PROBLEMS), the others carry on so a bad edit never blocks ./teardown.sh. Values allowed
+# but known to break the install get a warning only.
 KNOWN_SETTINGS=" REGION NAME_PREFIX AMI_ID KEY_NAME SSH_KEY_FILE NLB_PRIVATE_IP ACCESS_METHOD APP_COUNT
   INSTANCE_TYPE ROOT_VOLUME_SIZE_GB DATA_VOLUME_SIZE_GB DATA_VOLUME_COUNT USER_DATA_FILE AZ VPC_CIDR
   PRIVATE_CIDR LOCALUI_USER LOCALUI_PASSWORD SSH_USER JUMP_INSTANCE_TYPE JUMP_AMI_SSM_PARAM LOG_DIR

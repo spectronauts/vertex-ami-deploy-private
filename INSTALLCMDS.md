@@ -47,7 +47,7 @@ LOG_DIR="logs"
 ## 2. Network
 
 ```bash
-./create-vpc.sh                   # options: -c <file>
+./create-aws-infra.sh             # options: -c <file>
 ```
 
 ## 3-5. Security groups, access path, nodes (no NLB yet)

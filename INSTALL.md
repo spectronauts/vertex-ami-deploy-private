@@ -128,7 +128,7 @@ cp user-data.yaml.example user-data.yaml
 There is no internet gateway and no public subnet. Nothing in the VPC can reach the internet,
 and nothing on the internet can reach it.
 
-Scripted: `./create-vpc.sh` (refuses an internet gateway or any default route).
+Scripted: `./create-aws-infra.sh` (refuses an internet gateway or any default route).
 
 ---
 
@@ -415,7 +415,7 @@ changing anything.
 - [ ] `kubectl get pods -A` shows nothing outside Running or Completed, `hubble-system` included.
 - [ ] On a node: `curl -sk https://10.0.11.210:6443/healthz` returns `ok` (or 401/403).
 - [ ] On a node: `curl -m 5 https://example.com` fails (no egress).
-- [ ] The VPC has no internet gateway and no default route (`./create-vpc.sh` checks this).
+- [ ] The VPC has no internet gateway and no default route (`./create-aws-infra.sh` checks this).
 
 ### The VerteX console from your workstation
 

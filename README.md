@@ -29,7 +29,7 @@ needs `curl` and `jq`.
 | `architecture.excalidraw` | Its editable source; open at excalidraw.com or in the VS Code Excalidraw extension |
 | `config.env.example` | Settings; copy to `config.env` |
 | `user-data.yaml.example` | The airgap guide's user data (`fusion` user); copy to `user-data.yaml`, set password and key |
-| `create-vpc.sh` | VPC and one private subnet; refuses any internet gateway or default route |
+| `create-aws-infra.sh` | VPC and one private subnet; refuses any internet gateway or default route |
 | `deploy.sh` | Security groups, the access path, the nodes, and (without `--no-nlb`) the NLB on the VIP |
 | `connect.sh` | `localui`, `link`, `disks`, `console`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
 | `status.sh` | Instances, access path, NLB and target health; `--watch` updates live until all are healthy |
@@ -47,7 +47,7 @@ missing (INSTALL.md, "Before you start").
 ```bash
 cp config.env.example config.env               # set the six values at the top
 cp user-data.yaml.example user-data.yaml       # set the password and your SSH public key
-./create-vpc.sh
+./create-aws-infra.sh
 ./deploy.sh --no-nlb                           # everything except the NLB
 ./connect.sh localui                           # after ~25-30 min: https://localhost:5080, :5081, :5082
 ./connect.sh link                              # links nodes 2 and 3 to node 1, waits until all are ready,

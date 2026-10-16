@@ -4,7 +4,7 @@
 # DNS hostnames are on, which the SSM interface endpoints' private DNS needs.
 # Safe to re-run: existing resources (found by Name tag) are reused.
 #
-# Usage: ./create-vpc.sh [-c config.env]
+# Usage: ./create-aws-infra.sh [-c config.env]
 
 set -euo pipefail
 SCRIPT_ARGS=("$@")
