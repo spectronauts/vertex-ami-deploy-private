@@ -354,6 +354,7 @@ sign_in() {
     syslogin "$SYSTEM_ADMIN_NEW_PASSWORD" \
       || die "The password change was accepted, but the new password does not sign in ($(api_error))."
     ok "System admin password and email ($SYSTEM_ADMIN_EMAIL) set; signed in with the new password"
+    NEXT+=("A browser already signed in to the system console keeps showing the change-password page (it remembers the first sign-in): sign in again in a private window, or after clearing the site's data, with the new password.")
     if [[ -n "$typed" ]]; then NEXT+=("Set SYSTEM_ADMIN_PASSWORD in $SYSTEM_ENV to the new password before you re-run."); fi
   fi
 }
