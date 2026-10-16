@@ -143,6 +143,13 @@ curl -sk https://10.0.11.210:6443/healthz                           # ok (or 401
 curl -m 5 https://example.com                                       # must fail: no egress
 ```
 
+The VerteX console from your workstation:
+
+```bash
+./connect.sh console              # VIP 443 -> https://localhost:8443 (/system: system console)
+                                  # options: console [port]   (Ctrl-C to stop)
+```
+
 kubectl from your workstation:
 
 ```bash
@@ -166,7 +173,7 @@ cp system.env.example system.env && chmod 600 system.env    # fill in; only the 
 ./configure.sh                    # options: -c <file>  -s <system.env>  --url https://<host>  --dry-run
 ```
 
-Then, in the system console: **Tenant Management** > the tenant's menu > **Activate**, open the
+Then, in the system console (`./connect.sh console`): **Tenant Management** > the tenant's menu > **Activate**, open the
 activation URL, and set the tenant admin's password. Put it in `TENANT_ADMIN_PASSWORD` and run
 `./configure.sh` again if it reported tenant settings waiting on the tenant admin.
 

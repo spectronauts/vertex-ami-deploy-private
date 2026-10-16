@@ -31,7 +31,7 @@ needs `curl` and `jq`.
 | `user-data.yaml.example` | The airgap guide's user data (`fusion` user); copy to `user-data.yaml`, set password and key |
 | `create-vpc.sh` | VPC and one private subnet; refuses any internet gateway or default route |
 | `deploy.sh` | Security groups, the access path, the nodes, and (without `--no-nlb`) the NLB on the VIP |
-| `connect.sh` | `localui`, `link`, `disks`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
+| `connect.sh` | `localui`, `link`, `disks`, `console`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
 | `status.sh` | Instances, access path, NLB and target health; `--watch` updates live until all are healthy |
 | `system.env.example` | System console and tenant settings; copy to `system.env` |
 | `configure.sh` | Applies `system.env` through the VerteX API: admin password, activation, domain and TLS, SMTP, proxies, banners, security, admins, backups, a tenant and its sign-on |
@@ -72,7 +72,13 @@ normally; `--no-repair` turns the repairs off.
 The NLB must not exist when you enter the VIP: Local UI refuses an IP that any device
 already owns, and an NLB's IP belongs to its network interface.
 
-Once every port is healthy, configure the system console and a tenant:
+Once every port is healthy, sign in to VerteX through a forward of the VIP's port 443:
+
+```bash
+./connect.sh console                           # https://localhost:8443/system (system console)
+```
+
+Configure the system console and a tenant:
 
 ```bash
 cp system.env.example system.env && chmod 600 system.env    # fill it in

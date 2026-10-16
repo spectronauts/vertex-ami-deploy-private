@@ -8,6 +8,8 @@
 #                then checks each node's data drive (as disks does)
 #   disks        each node's data drive: the value for Storage Pool Drive in the cluster profile
 #   ssh [N]      shell on node N (default 1) as SSH_USER
+#   console [port]  forward the VIP's 443, VerteX's system console and tenant UI, to
+#                https://localhost:<port> (default 8443): sign in at /system, or at / for a tenant
 #   api          forward the VIP's Kubernetes API to https://localhost:6443 (for kubectl)
 #   kubeconfig [file]  copy node 1's admin kubeconfig, pointed at the api forward
 #                (default file: kubeconfig-<NAME_PREFIX>)
@@ -25,8 +27,8 @@ SCRIPT_ARGS=("$@")
 CMD="${1:-}"; ARG="${2:-1}"
 cd "$(dirname "$0")"
 case "$CMD" in
-  nodes|localui|link|disks|ssh|api|kubeconfig) LOG_NAME="connect-$CMD" ;;
-  *) sed -n '2,20p' "$0"; exit 2 ;;
+  nodes|localui|link|disks|console|ssh|api|kubeconfig) LOG_NAME="connect-$CMD" ;;
+  *) sed -n '2,22p' "$0"; exit 2 ;;
 esac
 # shellcheck source=lib.sh
 source ./lib.sh
@@ -359,6 +361,52 @@ case "$CMD" in
     echo "Wrote $out (cluster-admin credentials; keep it private)."
     echo "Keep ./connect.sh api running in another terminal, then: kubectl --kubeconfig $out get nodes" ;;
 
+  console)
+    # The VerteX UI on the VIP's 443, at https://localhost:<port>. A normal user can't listen on
+    # ports below 1024 (macOS refuses it on the loopback address too), hence 8443.
+    port="${2:-8443}"
+    [[ "$port" =~ ^[0-9]+$ && $port -ge 1 && $port -le 65535 ]] || die "Port must be a number, for example 8443."
+    [[ -n "$NLB_PRIVATE_IP" ]] || die "NLB_PRIVATE_IP is not set in $CONFIG."
+    [[ -n "$(nlb_arn)" ]] || die "No NLB yet: VerteX is reached on the VIP, which the NLB provides (./deploy.sh after Deploy Cluster)."
+    if [[ $port -lt 1024 && $(id -u) -ne 0 ]]; then
+      die "Only root can listen on localhost:$port. Use a port from 1024 up: ./connect.sh console 8443"
+    fi
+    if port_open localhost "$port"; then die "Something already listens on localhost:$port (another forward?). Pick another port: ./connect.sh console <port>"; fi
+    KILL_JOBS_ON_EXIT=true; QUIET_EXIT=true
+    url="https://localhost:$port"; [[ $port -eq 443 ]] && url="https://localhost"
+    if [[ "$ACCESS_METHOD" == "eice" ]]; then
+      eice_opts
+      fwd_out="$_LOG_TMP/ssh-console-forward.bg"
+      ssh "${EICE_OPTS[@]}" -o BatchMode=yes -o ExitOnForwardFailure=yes -N -L "$port:$NLB_PRIVATE_IP:443" \
+          "$SSH_USER@${IDS[0]}" 2>>"$fwd_out" &
+      logf INFO "console forward (pid $!): localhost:$port -> $NLB_PRIVATE_IP:443 through node 1 (${IDS[0]})"
+    else
+      SSM_QUIET=true; ssm_forward "$NLB_PRIVATE_IP" 443 "$port"; fwd_out="$_LOG_TMP/ssm-localhost-$port.bg"
+    fi
+    fwd_pid=$!
+    wait_port "$port" "$fwd_out"
+    code=$(curl -sk -o /dev/null -m 15 -w '%{http_code}' "https://localhost:$port/v1/auth/sso/providers" || true)
+    logf INFO "VerteX API check through the forward: HTTP ${code:-none}"
+    case "$code" in
+      2*|401|403) ok "VerteX answers on the VIP $NLB_PRIVATE_IP:443" ;;
+      *) warn "VerteX did not answer yet (HTTP ${code:-none}); is port 443 healthy? ./status.sh" ;;
+    esac
+    echo
+    echo "  System console:  $url/system     (admin; a new install's password is admin)"
+    echo "  Tenant console:  $url/           (a tenant's users, after it is activated)"
+    echo "  Accept the certificate warning until VerteX has your certificate. Ctrl-C to stop."
+    domain=""   # DOMAIN_HOST from system.env, if there is one
+    if [[ -f system.env ]]; then domain=$(sed -nE 's/^DOMAIN_HOST="?([^"]*)"?.*/\1/p' system.env | head -1) || domain=""; fi
+    if [[ -n "$domain" ]]; then
+      echo "  To use $domain (its certificate): add \"127.0.0.1 $domain\" to /etc/hosts, then open"
+      echo "  https://$domain$([[ $port -eq 443 ]] || echo ":$port")/system"
+    fi
+    echo
+    wait "$fwd_pid" || true
+    if [[ -s "$fwd_out" ]] && grep -qiE 'error|denied|refused|closed' "$fwd_out"; then
+      warn "The forward stopped: $(grep -iE 'error|denied|refused|closed' "$fwd_out" | tail -1)"; exit 1
+    fi ;;
+
   api)
     [[ -n "$NLB_PRIVATE_IP" ]] || die "NLB_PRIVATE_IP is not set."
     echo "Kubernetes API at https://localhost:6443 (kubeconfig: server https://localhost:6443, tls-server-name: kubernetes)."
@@ -370,5 +418,5 @@ case "$CMD" in
       ssm_forward "$NLB_PRIVATE_IP" 6443 6443; wait
     fi ;;
 
-  *) sed -n '2,20p' "$0"; exit 2 ;;
+  *) sed -n '2,22p' "$0"; exit 2 ;;
 esac

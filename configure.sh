@@ -493,7 +493,7 @@ configure_tenant() {
   local skipped_before=$SKIPPED
   configure_tenant_settings
   if [[ "$active" != true ]]; then
-    NEXT+=("Activate tenant $TENANT_ORG_NAME: in the system console, Tenant Management > the tenant's menu > Activate shows an activation URL; open it to set $TENANT_ADMIN_EMAIL's password.")
+    NEXT+=("Activate tenant $TENANT_ORG_NAME: in the system console (./connect.sh console, then https://localhost:8443/system), Tenant Management > the tenant's menu > Activate shows an activation URL; open it to set $TENANT_ADMIN_EMAIL's password.")
   fi
   if [[ $SKIPPED -gt $skipped_before ]]; then
     NEXT+=("Then put the tenant admin's password in TENANT_ADMIN_PASSWORD and re-run ./configure.sh to apply the $((SKIPPED - skipped_before)) skipped tenant setting(s).")

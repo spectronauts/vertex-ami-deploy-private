@@ -417,6 +417,21 @@ changing anything.
 - [ ] On a node: `curl -m 5 https://example.com` fails (no egress).
 - [ ] The VPC has no internet gateway and no default route (`./create-vpc.sh` checks this).
 
+### The VerteX console from your workstation
+
+```
+./connect.sh console          # or: ./connect.sh console <port>
+```
+
+It forwards the VIP's port 443 to `https://localhost:8443` through node 1 (or the jump host),
+checks that VerteX answers, and runs until you press Ctrl-C. Sign in to the system console at
+`https://localhost:8443/system` (user `admin`; a new install's password is `admin`, which
+VerteX makes you change), and to a tenant at `https://localhost:8443/`. A normal user can't
+listen on port 443 on the workstation, so the local port is 8443; pick another with
+`./connect.sh console <port>`. Once VerteX has your certificate (Step 10), map the domain to
+the forward to avoid the certificate warning: add `127.0.0.1 <domain>` to `/etc/hosts` and open
+`https://<domain>:8443/system`.
+
 ### kubectl from your workstation
 
 1. `./connect.sh kubeconfig` copies node 1's `/etc/kubernetes/admin.conf` to
@@ -468,8 +483,8 @@ through node 1, like `./connect.sh`; from a host that can reach VerteX directly,
 `--url https://<domain or VIP>`. Each change prints a check, and it ends with what is left
 for you:
 
-- **Activate the tenant:** in the system console, **Tenant Management** > the tenant's menu >
-  **Activate** shows the activation URL. Open it to set the tenant admin's password. Settings
+- **Activate the tenant:** in the system console (`./connect.sh console`), **Tenant
+  Management** > the tenant's menu > **Activate** shows the activation URL. Open it to set the tenant admin's password. Settings
   only the tenant admin may change wait until you put that password in
   `TENANT_ADMIN_PASSWORD` and run `./configure.sh` again.
 - **DNS:** point `DOMAIN_HOST` at the VIP.

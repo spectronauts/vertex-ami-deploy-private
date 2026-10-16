@@ -429,6 +429,7 @@ summary() {
     ./connect.sh localui        forwards every node's 5080 (node 1 -> https://localhost:5080)
     ./connect.sh ssh 1          shell on node 1
     ./connect.sh api            forwards the VIP's 6443 for kubectl
+    ./connect.sh console        forwards the VIP's 443: VerteX at https://localhost:8443/system
 EOF
   if [[ "$NO_NLB" == "true" ]]; then cat <<EOF
 
