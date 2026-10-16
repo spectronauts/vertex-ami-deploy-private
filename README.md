@@ -43,7 +43,7 @@ credentials it needs first, and prints the install command for your platform if 
 missing (INSTALL.md, "Before you start").
 
 ```bash
-cp config.env.example config.env               # AMI_ID, KEY_NAME, SSH_KEY_FILE, ACCESS_METHOD
+cp config.env.example config.env               # set the six values at the top
 cp user-data.yaml.example user-data.yaml       # set the password and your SSH public key
 ./create-vpc.sh
 ./deploy.sh --no-nlb                           # everything except the NLB

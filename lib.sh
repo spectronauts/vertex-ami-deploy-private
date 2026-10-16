@@ -210,6 +210,81 @@ SSM_SERVICES="ssm ssmmessages ec2messages"
 aws_q() { aws "$@" --output text 2>/dev/null; }
 none_to_empty() { [[ "$1" == "None" ]] && echo "" || echo "$1"; }
 
+# --- Settings check: every script, before anything else; no AWS calls ---------------------------
+# Names any setting no script can use; create-vpc.sh and deploy.sh stop on them (CONFIG_PROBLEMS),
+# the others carry on so a bad edit never blocks ./teardown.sh. Values allowed but known to break
+# the install get a warning only.
+KNOWN_SETTINGS=" REGION NAME_PREFIX AMI_ID KEY_NAME SSH_KEY_FILE NLB_PRIVATE_IP ACCESS_METHOD APP_COUNT
+  INSTANCE_TYPE ROOT_VOLUME_SIZE_GB DATA_VOLUME_SIZE_GB DATA_VOLUME_COUNT USER_DATA_FILE AZ VPC_CIDR
+  PRIVATE_CIDR LOCALUI_USER LOCALUI_PASSWORD SSH_USER JUMP_INSTANCE_TYPE JUMP_AMI_SSM_PARAM LOG_DIR
+  APP_PORTS NODE_TO_NODE PRESERVE_CLIENT_IP "
+ip_to_int() {  # dotted IPv4 -> integer, or fail if malformed
+  local IFS=. o n=0
+  [[ "$1" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+  for o in $1; do o=$((10#$o)); [[ $o -le 255 ]] || return 1; n=$((n * 256 + o)); done
+  echo "$n"
+}
+usable_ip() {  # ip cidr -> 0 if ip is a host address AWS lets you assign (it reserves the first four and the last)
+  local ip net bits size
+  ip=$(ip_to_int "$1") && net=$(ip_to_int "${2%/*}") || return 1
+  bits=${2#*/}; size=$((1 << (32 - bits)))
+  [[ $ip -ge $((net + 4)) && $ip -lt $((net + size - 1)) ]]
+}
+cidr_ok() {  # cidr -> 0 if it is a network address with a /16 to /28 prefix (what AWS allows)
+  local net bits
+  [[ "$1" =~ ^[0-9.]+/[0-9]{1,2}$ ]] || return 1
+  net=$(ip_to_int "${1%/*}") || return 1; bits=$((10#${1#*/}))
+  [[ $bits -ge 16 && $bits -le 28 && $((net % (1 << (32 - bits)))) -eq 0 ]]
+}
+cidr_within() {  # inner outer -> 0 if inner lies inside outer
+  local i o ib ob
+  i=$(ip_to_int "${1%/*}") && o=$(ip_to_int "${2%/*}") || return 1
+  ib=$((10#${1#*/})); ob=$((10#${2#*/}))
+  [[ $ib -ge $ob && $((i - i % (1 << (32 - ob)))) -eq $o ]]
+}
+check_config() {  # sets CONFIG_PROBLEMS
+  local bad=() name p
+  for name in $(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$CONFIG"); do
+    if [[ "$KNOWN_SETTINGS" != *[[:space:]]"$name"[[:space:]]* ]]; then
+      bad+=("$CONFIG sets $name, which no script reads (a typo?).")
+    fi
+  done
+  if [[ ! "$REGION" =~ ^[a-z]{2}(-gov|-iso[a-z]*)?-[a-z]+-[0-9]$ ]]; then bad+=("REGION '$REGION' is not an AWS region name (for example us-gov-west-1)."); fi
+  if [[ ! "$NAME_PREFIX" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,18}[A-Za-z0-9])?$ ]]; then
+    bad+=("NAME_PREFIX '$NAME_PREFIX': use up to 20 letters, digits and dashes, not starting or ending with a dash."); fi
+  if [[ -n "$AMI_ID" && ! "$AMI_ID" =~ ^ami-[0-9a-f]{8,17}$ ]]; then bad+=("AMI_ID '$AMI_ID' is not an AMI ID (ami-0123456789abcdef0)."); fi
+  if [[ "$ACCESS_METHOD" != eice && "$ACCESS_METHOD" != ssm ]]; then bad+=("ACCESS_METHOD '$ACCESS_METHOD': use eice or ssm."); fi
+  if [[ ! "$APP_COUNT" =~ ^[1-9]$ ]]; then bad+=("APP_COUNT '$APP_COUNT': use 3 for a cluster or 1 for a single node."); fi
+  if [[ ! "$INSTANCE_TYPE" =~ ^[a-z][a-z0-9-]*\.[a-z0-9]+$ ]]; then bad+=("INSTANCE_TYPE '$INSTANCE_TYPE' is not an instance type (m5.2xlarge)."); fi
+  if [[ ! "$ROOT_VOLUME_SIZE_GB" =~ ^[0-9]+$ ]]; then bad+=("ROOT_VOLUME_SIZE_GB '$ROOT_VOLUME_SIZE_GB': a whole number of GB, at least 300."); fi
+  if [[ ! "$DATA_VOLUME_SIZE_GB" =~ ^[0-9]+$ ]] || (( DATA_VOLUME_SIZE_GB < 1 || DATA_VOLUME_SIZE_GB > 16384 )); then
+    bad+=("DATA_VOLUME_SIZE_GB '$DATA_VOLUME_SIZE_GB': a whole number of GB from 1 to 16384."); fi
+  if [[ ! "$DATA_VOLUME_COUNT" =~ ^[1-6]$ ]]; then bad+=("DATA_VOLUME_COUNT '$DATA_VOLUME_COUNT': use 1; the AMI builds its storage pool on one data disk."); fi
+  if ! cidr_ok "$VPC_CIDR"; then bad+=("VPC_CIDR '$VPC_CIDR': a network address with a /16 to /28 prefix (10.0.0.0/16)."); fi
+  if ! cidr_ok "$PRIVATE_CIDR"; then bad+=("PRIVATE_CIDR '$PRIVATE_CIDR': a network address with a /16 to /28 prefix (10.0.11.0/24).")
+  elif cidr_ok "$VPC_CIDR" && ! cidr_within "$PRIVATE_CIDR" "$VPC_CIDR"; then bad+=("PRIVATE_CIDR $PRIVATE_CIDR is not inside VPC_CIDR $VPC_CIDR."); fi
+  if [[ -n "$NLB_PRIVATE_IP" ]] && ! usable_ip "$NLB_PRIVATE_IP" "$PRIVATE_CIDR"; then
+    bad+=("NLB_PRIVATE_IP '$NLB_PRIVATE_IP' is not an address AWS lets you assign in PRIVATE_CIDR $PRIVATE_CIDR (it keeps the first four and the last)."); fi
+  for p in $APP_PORTS; do
+    if [[ ! "$p" =~ ^[0-9]+$ ]] || (( p < 1 || p > 65535 )); then bad+=("APP_PORTS has '$p', which is not a port number."); fi
+  done
+  if [[ "$NODE_TO_NODE" != true && "$NODE_TO_NODE" != false ]]; then bad+=("NODE_TO_NODE '$NODE_TO_NODE': use true."); fi
+  if [[ "$PRESERVE_CLIENT_IP" != true && "$PRESERVE_CLIENT_IP" != false ]]; then bad+=("PRESERVE_CLIENT_IP '$PRESERVE_CLIENT_IP': use false."); fi
+  if [[ -z "$SSH_USER" ]]; then bad+=("SSH_USER is empty; use kairos."); fi
+  # Allowed, but each breaks the install or the tools:
+  for p in 443 6443 30003; do
+    if [[ " $APP_PORTS " != *" $p "* ]]; then warn "APP_PORTS leaves out $p, which the cluster needs behind the VIP."; fi
+  done
+  if [[ "$NODE_TO_NODE" == false && "$APP_COUNT" != 1 ]]; then warn "NODE_TO_NODE=false: the nodes can't link or form a cluster."; fi
+  if [[ "$PRESERVE_CLIENT_IP" == true ]]; then warn "PRESERVE_CLIENT_IP=true: a node can't reach its own API through the VIP."; fi
+  if [[ "$APP_COUNT" =~ ^[0-9]+$ && $((APP_COUNT % 2)) -eq 0 ]]; then warn "APP_COUNT=$APP_COUNT: use an odd number (3) so etcd keeps a majority."; fi
+  if [[ -n "$SSH_KEY_FILE" && ! -f "$SSH_KEY_FILE" ]]; then warn "SSH_KEY_FILE $SSH_KEY_FILE doesn't exist."; fi
+  for p in ${bad[@]+"${bad[@]}"}; do warn "$p"; done
+  CONFIG_PROBLEMS=${#bad[@]}
+  logf INFO "Settings check: $CONFIG_PROBLEMS problem(s)"
+}
+check_config
+
 # --- Workstation prerequisites: macOS or Linux, x86_64 or arm64 -----------------------------
 OS=$(uname -s); ARCH=$(uname -m)
 

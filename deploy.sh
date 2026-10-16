@@ -34,26 +34,14 @@ cd "$(dirname "$0")"
 source ./lib.sh
 
 # ---------------------------------------------------------------------------
-ip_to_int() {  # dotted IPv4 -> integer, or fail if malformed
-  local IFS=. o n=0
-  [[ "$1" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
-  for o in $1; do o=$((10#$o)); [[ $o -le 255 ]] || return 1; n=$((n * 256 + o)); done
-  echo "$n"
-}
-usable_ip() {  # ip cidr -> 0 if ip is a host address AWS lets you assign (it reserves the first four and the last)
-  local ip net bits size
-  ip=$(ip_to_int "$1") && net=$(ip_to_int "${2%/*}") || return 1
-  bits=${2#*/}; size=$((1 << (32 - bits)))
-  [[ $ip -ge $((net + 4)) && $ip -lt $((net + size - 1)) ]]
-}
-
 preflight() {
   log "Preflight checks"
   local v
   for v in REGION AMI_ID KEY_NAME USER_DATA_FILE NLB_PRIVATE_IP; do
     [[ -n "${!v:-}" ]] || die "$v is required in $CONFIG."
   done
-  [[ "$ACCESS_METHOD" == "eice" || "$ACCESS_METHOD" == "ssm" ]] || die "ACCESS_METHOD must be eice or ssm."
+  [[ $CONFIG_PROBLEMS -eq 0 ]] || die "Fix the settings above in $CONFIG, then re-run."
+  ok "Settings in $CONFIG"
   logf INFO "Mode: preflight-only=$PREFLIGHT_ONLY, no-nlb=$NO_NLB"
   require_aws
   ok "Authenticated as $CALLER_ARN ($OS $ARCH)"
@@ -108,7 +96,6 @@ preflight() {
   log_detail aws ec2 describe-instances --filters "Name=tag:$TAG_KEY,Values=$NAME_PREFIX" --output json --query \
       'Reservations[].Instances[].{Name:Tags[?Key==`Name`]|[0].Value,Id:InstanceId,State:State.Name,Ip:PrivateIpAddress,Launched:LaunchTime}'
 
-  usable_ip "$NLB_PRIVATE_IP" "$PRIVATE_CIDR" || die "NLB_PRIVATE_IP $NLB_PRIVATE_IP is not a usable address in $PRIVATE_CIDR."
   local arn current
   arn=$(nlb_arn); current=""
   [[ -n "$arn" ]] && current=$(nlb_private_ip "$arn")

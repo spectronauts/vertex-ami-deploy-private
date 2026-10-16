@@ -32,6 +32,7 @@ pick_az() {
 }
 
 log "Private network ($REGION)"
+[[ $CONFIG_PROBLEMS -eq 0 ]] || die "Fix the settings above in $CONFIG, then re-run."
 require_aws
 ok "Authenticated as $CALLER_ARN ($OS $ARCH)"
 
