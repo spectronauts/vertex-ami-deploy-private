@@ -202,17 +202,16 @@ ensure_eice() {
   fi
 }
 
-wait_eice() {
-  local i state=""
-  for i in $(seq 1 40); do
-    state=$(aws_q ec2 describe-instance-connect-endpoints --instance-connect-endpoint-ids "$EICE_ID" \
-        --query 'InstanceConnectEndpoints[0].State')
-    logf INFO "EC2 Instance Connect Endpoint $EICE_ID: ${state:-unknown} (check $i of 40)"
-    [[ "$state" == "create-complete" ]] && break
-    sleep 15
-  done
-  [[ "$state" == "create-complete" ]] || die "EC2 Instance Connect Endpoint $EICE_ID is '$state' after 10 minutes."
-  ok "EC2 Instance Connect Endpoint ready"
+eice_ready() {  # wait_until check: the endpoint's state
+  WAIT_STATE=$(none_to_empty "$(aws_q ec2 describe-instance-connect-endpoints --instance-connect-endpoint-ids "$EICE_ID" \
+      --query 'InstanceConnectEndpoints[0].State')")
+  case "$WAIT_STATE" in create-complete) return 0 ;; create-failed|delete-*) return 2 ;; esac
+  return 1
+}
+wait_eice() {  # usually 3-5 minutes from creation
+  local rc=0
+  wait_until "EC2 Instance Connect Endpoint $EICE_ID" "EC2 Instance Connect Endpoint $EICE_ID ready" 900 10 eice_ready || rc=$?
+  [[ $rc -eq 0 ]] || die "EC2 Instance Connect Endpoint $EICE_ID is '${WAIT_STATE:-unknown}'$([[ $rc -eq 1 ]] && echo " after 15 minutes")."
 }
 
 ensure_ssm() {
@@ -266,17 +265,16 @@ ensure_ssm() {
   fi
 }
 
+ssm_online() {  # wait_until check: the jump host's Session Manager status
+  WAIT_STATE=$(none_to_empty "$(aws_q ssm describe-instance-information --filters "Key=InstanceIds,Values=$JUMP_ID" \
+      --query 'InstanceInformationList[0].PingStatus')")
+  [[ "$WAIT_STATE" == "Online" ]] && return 0
+  WAIT_STATE=${WAIT_STATE:-not registered yet}
+  return 1
+}
 wait_ssm() {
-  local i status=""
-  for i in $(seq 1 30); do
-    status=$(aws_q ssm describe-instance-information --filters "Key=InstanceIds,Values=$JUMP_ID" \
-        --query 'InstanceInformationList[0].PingStatus')
-    logf INFO "Jump host $JUMP_ID Session Manager status: ${status:-not registered} (check $i of 30)"
-    [[ "$status" == "Online" ]] && break
-    sleep 15
-  done
-  [[ "$status" == "Online" ]] || die "Jump host $JUMP_ID is not online in Session Manager after 7 minutes; check the endpoints and their security group."
-  ok "Jump host online in Session Manager"
+  wait_until "Jump host $JUMP_ID in Session Manager" "Jump host $JUMP_ID online in Session Manager" 600 10 ssm_online \
+    || die "Jump host $JUMP_ID is not online in Session Manager after 10 minutes; check the endpoints and their security group."
 }
 
 # ---------------------------------------------------------------------------
@@ -289,6 +287,15 @@ block_device_json() {
   echo "$out]"
 }
 
+nodes_running() {  # wait_until check: how many of APP_IDS are running
+  local states s r=0 t=0
+  states=$(aws_q ec2 describe-instances --instance-ids "${APP_IDS[@]}" --query 'Reservations[].Instances[].State.Name' | tr '\t' '\n') || true
+  for s in $states; do t=$((t + 1)); if [[ "$s" == running ]]; then r=$((r + 1)); fi; done
+  WAIT_STATE="$r of ${#APP_IDS[@]} running"
+  if [[ $t -gt 0 && $r -eq ${#APP_IDS[@]} ]]; then return 0; fi
+  if [[ " $(echo $states) " == *" terminated "* || " $(echo $states) " == *" shutting-down "* ]]; then WAIT_STATE+="; one is terminating"; return 2; fi
+  return 1
+}
 ensure_nodes() {
   log "Appliance nodes ($APP_COUNT x $INSTANCE_TYPE)"
   local n id
@@ -312,8 +319,8 @@ ensure_nodes() {
     fi
     APP_IDS+=("$id")
   done
-  aws ec2 wait instance-running --instance-ids "${APP_IDS[@]}"
-  ok "All nodes running"
+  wait_until "Starting nodes" "All ${#APP_IDS[@]} nodes running" 600 5 nodes_running \
+    || die "Not every node is running after 10 minutes (${WAIT_STATE}); see the log."
   log_detail aws ec2 describe-instances --instance-ids "${APP_IDS[@]}" --output json --query \
       'Reservations[].Instances[].{Name:Tags[?Key==`Name`]|[0].Value,Id:InstanceId,Type:InstanceType,State:State.Name,Ip:PrivateIpAddress,Az:Placement.AvailabilityZone,Launched:LaunchTime,Volumes:BlockDeviceMappings[].[DeviceName,Ebs.VolumeId]}'
 }

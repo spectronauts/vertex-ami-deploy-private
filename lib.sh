@@ -381,14 +381,45 @@ port_open() {  # host port -> 0 if something accepts TCP connections there (bash
 # --- Live progress: in-place spinner lines in a terminal, plain lines otherwise -------------
 SPIN=('|' '/' '-' '\')
 GREEN_CHECK=$'\033[1;32m✓\033[0m'
-spin_line() {  # tick text: one in-place line with a spinner (terminals only)
-  if [[ -t 1 ]]; then printf '\r\033[K  %s %s' "${SPIN[$(($1 % 4))]}" "$2"; fi
+TERM_COLS=$( (tput cols 2>/dev/null || echo 120) | tr -dc '0-9' ); TERM_COLS=${TERM_COLS:-120}
+spin_line() {  # tick text: one in-place line with a spinner (terminals only), cut to the terminal's width
+  local t=$2
+  if (( ${#t} > TERM_COLS - 6 )); then t="${t:0:$((TERM_COLS - 7))}~"; fi   # a wrapped line can't be redrawn
+  if [[ -t 1 ]]; then printf '\r\033[K  %s %s' "${SPIN[$(($1 % 4))]}" "$t"; fi
 }
 check_line() {  # text: finish the current line with a green check
   if [[ -t 1 ]]; then printf '\r\033[K'; fi
   printf '  %s %s\n' "$GREEN_CHECK" "$1"; logf OK "$1"
 }
 end_line() { if [[ -t 1 ]]; then printf '\n'; fi; }
+stop_line() {  # text: finish the current line with a yellow "!" (a wait that failed or timed out)
+  if [[ -t 1 ]]; then printf '\r\033[K'; fi
+  printf '\033[1;33m  !\033[0m %s\n' "$1"; logf WARN "$1"
+}
+wait_until() {  # waiting-text done-text timeout-seconds poll-seconds command...
+  # One live line ("| waiting-text: state 1m05s") until command succeeds, then "✓ done-text after 1m05s".
+  # command runs every poll-seconds in this shell; it sets WAIT_STATE (shown on the line) and
+  # returns 0 when done, 1 to keep waiting, 2 when it has failed. Returns 0 done, 1 timed out,
+  # 2 failed (WAIT_STATE says why). Not a terminal: one line per change of state.
+  local what=$1 done_text=$2 limit=$3 every=$4 start=$SECONDS tick=0 rc el last="-"
+  shift 4
+  WAIT_STATE=""
+  while :; do
+    el=$(elapsed $((SECONDS - start)))
+    if (( tick % (every * 4) == 0 )); then
+      rc=0; "$@" || rc=$?
+      if [[ "$WAIT_STATE" != "$last" ]]; then
+        logf INFO "$what: ${WAIT_STATE:-waiting} (after $el)"; last=$WAIT_STATE
+        if [[ ! -t 1 && $rc -ne 0 ]]; then echo "  $what: ${WAIT_STATE:-waiting} $el"; fi
+      fi
+      if [[ $rc -eq 0 ]]; then check_line "$done_text after $el"; return 0; fi
+      if [[ $rc -eq 2 ]]; then stop_line "$what: ${WAIT_STATE:-failed} after $el"; return 2; fi
+      if (( SECONDS - start >= limit )); then stop_line "$what: still ${WAIT_STATE:-waiting} after $el; gave up"; return 1; fi
+    fi
+    spin_line "$tick" "$what: ${WAIT_STATE:-checking} $el"
+    sleep 0.25; tick=$((tick + 1))
+  done
+}
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 tags() {  # resource-type name -> a --tag-specifications value
@@ -460,12 +491,13 @@ ssm_forward() {  # remote-host remote-port local-port  (runs in the background; 
   fi
   logf INFO "SSM port forward localhost:$3 -> $1:$2 through jump host $jump (pid $!)"
 }
+port_listening() {  # wait_until check: something listens on WAIT_PORT
+  if port_open localhost "$WAIT_PORT"; then WAIT_STATE="open"; return 0; fi
+  WAIT_STATE="connecting"; return 1
+}
 wait_port() {  # local-port [process-output-file]: wait until something listens on it
-  local i
-  for i in $(seq 1 30); do
-    if port_open localhost "$1"; then logf DEBUG "localhost:$1 is listening (after ${i}s)"; return 0; fi
-    sleep 1
-  done
+  WAIT_PORT=$1
+  wait_until "Forward to localhost:$1" "Forward on localhost:$1 open" 30 1 port_listening && return 0
   if [[ -s "${2:-}" ]]; then warn "Forward output: $(tail -3 "$2" | tr '\n' ' ')"; fi
   die "Nothing listening on localhost:$1 after 30 seconds."
 }

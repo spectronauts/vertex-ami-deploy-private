@@ -21,14 +21,32 @@ cd "$(dirname "$0")"
 source ./lib.sh
 require_aws
 
-retry() {  # tries what command...  (network interfaces take a while to release)
-  local tries=$1 what=$2 i; shift 2
-  for ((i = 1; i <= tries; i++)); do
-    if "$@" >/dev/null 2>&1; then logf INFO "$what: done (attempt $i)"; return 0; fi
-    logf INFO "$what: attempt $i of $tries failed (see the error above); retrying in 15s"
-    sleep 15
-  done
-  warn "Could not $what; delete it manually."
+RETRY_CMD=(); RETRY_N=0
+retry_once() {  # wait_until check: one more try of RETRY_CMD
+  RETRY_N=$((RETRY_N + 1))
+  if "${RETRY_CMD[@]}" >/dev/null 2>&1; then WAIT_STATE="done on try $RETRY_N"; return 0; fi
+  WAIT_STATE="still in use, try $RETRY_N"   # its network interfaces take a while to release
+  return 1
+}
+retry() {  # tries waiting-text done-text command...: retry every 15 seconds, with a live line
+  local tries=$1 what=$2 done_text=$3; shift 3
+  RETRY_CMD=("$@"); RETRY_N=0
+  wait_until "$what" "$done_text" $((tries * 15)) 15 retry_once || warn "Could not finish: $what. Delete it manually."
+}
+nlb_gone() {  # wait_until check: NLB_ARN deleted (AWS answers LoadBalancerNotFound)
+  local out
+  if out=$(aws elbv2 describe-load-balancers --load-balancer-arns "$NLB_ARN" --query 'LoadBalancers[0].State.Code' --output text 2>&1); then
+    WAIT_STATE="still $out"; return 1
+  fi
+  if [[ "$out" == *LoadBalancerNotFound* ]]; then WAIT_STATE="deleted"; return 0; fi
+  WAIT_STATE="checking (AWS error; see the log)"; return 1
+}
+instances_gone() {  # wait_until check: every instance in IDS terminated
+  local states s g=0
+  states=$(aws_q ec2 describe-instances --instance-ids "${IDS[@]}" --query 'Reservations[].Instances[].State.Name' | tr '\t' '\n') || true
+  for s in $states; do if [[ "$s" == terminated ]]; then g=$((g + 1)); fi; done
+  WAIT_STATE="$g of ${#IDS[@]} terminated"
+  [[ $g -eq ${#IDS[@]} ]]
 }
 
 if [[ "$NLB_ONLY" == "true" ]]; then
@@ -39,7 +57,7 @@ if [[ "$NLB_ONLY" == "true" ]]; then
   [[ "$answer" == "$NAME_PREFIX" ]] || { echo "Cancelled."; logf INFO "Cancelled"; exit 1; }
   log "Deleting NLB ${NAME_PREFIX}-nlb (target groups kept)"
   aws elbv2 delete-load-balancer --load-balancer-arn "$NLB_ARN"
-  aws elbv2 wait load-balancers-deleted --load-balancer-arns "$NLB_ARN"
+  wait_until "Deleting NLB ${NAME_PREFIX}-nlb" "NLB ${NAME_PREFIX}-nlb deleted" 600 5 nlb_gone || warn "The NLB is still being deleted; check the console."
   log "NLB deleted. Its IP is free about a minute later; ./deploy.sh re-creates it."
   exit 0
 fi
@@ -72,7 +90,7 @@ NLB_ARN=$(nlb_arn)
 if [[ -n "$NLB_ARN" ]]; then
   log "Deleting NLB ${NAME_PREFIX}-nlb"
   aws elbv2 delete-load-balancer --load-balancer-arn "$NLB_ARN"
-  aws elbv2 wait load-balancers-deleted --load-balancer-arns "$NLB_ARN"
+  wait_until "Deleting NLB ${NAME_PREFIX}-nlb" "NLB ${NAME_PREFIX}-nlb deleted" 600 5 nlb_gone || warn "The NLB is still being deleted; check the console."
 fi
 for port in $APP_PORTS; do
   tg=$(none_to_empty "$(aws_q elbv2 describe-target-groups --names "${NAME_PREFIX}-tg-$port" --query 'TargetGroups[0].TargetGroupArn' || true)")
@@ -86,7 +104,8 @@ IDS=($(aws_q ec2 describe-instances --filters "Name=tag:$TAG_KEY,Values=$NAME_PR
 if [[ ${#IDS[@]} -gt 0 ]]; then
   log "Terminating instances: ${IDS[*]}"
   aws ec2 terminate-instances --instance-ids "${IDS[@]}" >/dev/null
-  aws ec2 wait instance-terminated --instance-ids "${IDS[@]}"
+  wait_until "Terminating instances" "${#IDS[@]} instances terminated (volumes deleted with them)" 900 10 instances_gone \
+    || warn "Not every instance has terminated yet (${WAIT_STATE}); the next steps retry while they finish."
 fi
 
 # 3. Access path: EC2 Instance Connect Endpoint, SSM interface endpoints, jump host role
@@ -128,8 +147,7 @@ for rtb in $(aws_q ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_
   aws ec2 delete-route-table --route-table-id "$rtb"
 done
 for sn in $(aws_q ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[].SubnetId'); do
-  log "Deleting subnet $sn"
-  retry 40 "delete subnet $sn" aws ec2 delete-subnet --subnet-id "$sn"
+  retry 40 "Deleting subnet $sn" "Subnet $sn deleted" aws ec2 delete-subnet --subnet-id "$sn"
 done
 
 # 5. Security groups (they reference each other, so empty them first), then the VPC
@@ -142,11 +160,9 @@ for sg in $SGS; do
   done
 done
 for sg in $SGS; do
-  log "Deleting security group $sg"
-  retry 12 "delete security group $sg" aws ec2 delete-security-group --group-id "$sg"
+  retry 12 "Deleting security group $sg" "Security group $sg deleted" aws ec2 delete-security-group --group-id "$sg"
 done
-log "Deleting VPC $VPC_ID"
-retry 8 "delete VPC $VPC_ID" aws ec2 delete-vpc --vpc-id "$VPC_ID"
+retry 8 "Deleting VPC $VPC_ID" "VPC $VPC_ID deleted" aws ec2 delete-vpc --vpc-id "$VPC_ID"
 
 rm -f "$OUTPUT_FILE"
 log "Teardown complete."
