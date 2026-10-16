@@ -11,8 +11,8 @@
 #   --dry-run   sign in and check everything, but change nothing
 #
 # It signs in as the system admin with /v1/auth/syslogin and calls the VerteX API on port 443
-# of the VIP (NLB_PRIVATE_IP), through node 1 like ./connect.sh. Passwords, keys and tokens are
-# never written to the run log.
+# of the VIP (NLB_PRIVATE_IP), through node 1 like ./connect.sh, making the same calls the system
+# console makes. Passwords, keys, tokens and activation links are never written to the run log.
 
 set -euo pipefail
 SCRIPT_ARGS=("$@")
@@ -166,13 +166,15 @@ ask_secret() {  # variable prompt: read a password into the variable if it is em
 
 # --- The VerteX API ------------------------------------------------------------------------------
 API_BASE=""; CONNECT_TO=""; API_TOKEN=""; API_STATUS=""; API_BODY=""
-REDACT_JQ='def r: if type == "object" then with_entries(if (.key | test("pass|secret|token|authorization|key|cert|federation"; "i")) and (.value | type) == "string" then .value = "<redacted, \(.value | length) chars>" else .value |= r end) elif type == "array" then map(r) else . end; r'
+REDACT_JQ='def r: if type == "object" then with_entries(if (.key | test("pass|secret|token|authorization|key|cert|federation|link"; "i")) and (.value | type) == "string" then .value = "<redacted, \(.value | length) chars>" else .value |= r end) elif type == "array" then map(r) else . end; r'
 redact_json() {  # text: JSON with every secret-looking string replaced, or a short note for anything else
   [[ -n "$1" ]] || return 0
   jq -c "$REDACT_JQ" <<<"$1" 2>/dev/null || printf '(%s bytes, not JSON)\n' "${#1}"
 }
+log_path() { printf '%s' "$1" | sed -E 's#/password/[^/]+/(activate|reset)#/password/<token>/\1#'; }   # tokens out of the log
 api() {  # method path [json-body]: sets API_STATUS and API_BODY; 0 on HTTP 2xx. Logged without secrets.
-  local method=$1 path=$2 body=${3:-} out rc=0 t0 errf
+  local method=$1 path=$2 body=${3:-} out rc=0 t0 errf lp
+  lp=$(log_path "$2")
   local args=(-sS -k --connect-timeout 15 --max-time 120 -X "$method" -H 'Content-Type: application/json' -w '\n%{http_code}')
   if [[ -n "$API_TOKEN" ]]; then args+=(-H "Authorization: $API_TOKEN"); fi
   if [[ -n "$CONNECT_TO" ]]; then args+=(--connect-to "$CONNECT_TO"); fi
@@ -184,12 +186,12 @@ api() {  # method path [json-body]: sets API_STATUS and API_BODY; 0 on HTTP 2xx.
   fi
   if [[ $rc -ne 0 ]]; then
     API_STATUS="000"; API_BODY="$(tr '\n' ' ' <"$errf")"; rm -f "$errf"
-    logf WARN "VerteX $method $path: no answer (curl exit $rc after $(_took "$t0")): $API_BODY"
+    logf WARN "VerteX $method $lp: no answer (curl exit $rc after $(_took "$t0")): $API_BODY"
     return 1
   fi
   rm -f "$errf"
   API_STATUS=${out##*$'\n'}; API_BODY=${out%$'\n'*}
-  logf DEBUG "VerteX $method $path -> HTTP $API_STATUS in $(_took "$t0")"
+  logf DEBUG "VerteX $method $lp -> HTTP $API_STATUS in $(_took "$t0")"
   log_text req "$(redact_json "$body")"
   log_text res "$(redact_json "$API_BODY")"
   [[ "$API_STATUS" =~ ^2 ]]
@@ -204,7 +206,7 @@ b64() { base64 <"$1" | tr -d '\n'; }   # a file as one line of base64
 APPLIED=0; FAILED=0; SKIPPED=0; NEXT=()
 apply() {  # label method path [body]: one change; a check when VerteX takes it, a "!" (and carry on) if not
   if [[ "$DRY_RUN" == true ]]; then
-    printf '  - %s (dry run: not changed)\n' "$1"; logf INFO "dry run, not sent: $2 $3"; return 0
+    printf '  - %s (dry run: not changed)\n' "$1"; logf INFO "dry run, not sent: $2 $(log_path "$3")"; return 0
   fi
   if api "$2" "$3" "${4:-}"; then ok "$1"; APPLIED=$((APPLIED + 1)); return 0; fi
   warn "$1: not applied ($(api_error))"; FAILED=$((FAILED + 1)); return 1
@@ -251,7 +253,7 @@ syslogin() {  # password: sign in as SYSTEM_ADMIN_USERNAME; sets API_TOKEN and P
   local body
   body=$(U="$SYSTEM_ADMIN_USERNAME" P="$1" jq -cn '{username: env.U, password: env.P}')
   API_TOKEN=""
-  api POST /v1/auth/syslogin "$body" || return 1
+  api POST "/v1/auth/syslogin?setCookie=false" "$body" || return 1
   API_TOKEN=$(jq -r '.Authorization // empty' <<<"$API_BODY")
   PASSWORD_IS_SET=$(jq -r 'if .IsPasswordReset == false then "false" else "true" end' <<<"$API_BODY")
   [[ -n "$API_TOKEN" ]]
@@ -490,11 +492,9 @@ configure_tenant() {
     [[ -n "$TENANT_UID" ]] || { warn "VerteX created the tenant but returned no UID; re-run to apply its settings."; return 0; }
   fi
   [[ "$DRY_RUN" == true && -z "$TENANT_UID" ]] && return 0
+  if [[ "$active" != true ]]; then activate_tenant; fi
   local skipped_before=$SKIPPED
   configure_tenant_settings
-  if [[ "$active" != true ]]; then
-    NEXT+=("Activate tenant $TENANT_ORG_NAME: in the system console (./connect.sh console, then https://localhost:8443/system), Tenant Management > the tenant's menu > Activate shows an activation URL; open it to set $TENANT_ADMIN_EMAIL's password.")
-  fi
   if [[ $SKIPPED -gt $skipped_before ]]; then
     NEXT+=("Then put the tenant admin's password in TENANT_ADMIN_PASSWORD and re-run ./configure.sh to apply the $((SKIPPED - skipped_before)) skipped tenant setting(s).")
   fi
@@ -502,6 +502,35 @@ configure_tenant() {
 
 fips_mode() { if [[ "$1" == true ]]; then echo nonFipsEnabled; else echo nonFipsDisabled; fi; }
 allowed() { if [[ "$1" == true ]]; then echo allowed; else echo blocked; fi; }
+activate_tenant() {
+  # What the console's Activate does: fetch the tenant's one-time activation link, which has the
+  # admin set a password. With TENANT_ADMIN_PASSWORD, set it here; otherwise print the link.
+  local link token
+  if ! api GET "/v1/users/$TENANT_UID/activationlink"; then
+    warn "Could not get tenant $TENANT_ORG_NAME's activation link ($(api_error)); use the console's Activate."; return 0
+  fi
+  link=$(jq -r '.activationLink // empty' <<<"$API_BODY")
+  if [[ -z "$link" ]]; then ok "Tenant $TENANT_ORG_NAME is already active"; return 0; fi
+  token=$(sed -nE 's#.*/password/([^/?#]+)/activate.*#\1#p' <<<"$link")
+  if [[ -n "${TENANT_ADMIN_PASSWORD:-}" && -n "$token" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then printf '  - Set the tenant admin password and activate %s (dry run: not changed)\n' "$TENANT_ORG_NAME"; return 0; fi
+    local saved=$API_TOKEN; API_TOKEN=""   # the activation link works without signing in
+    if api PATCH "/v1/auth/password/$token/activate" "$(P="$TENANT_ADMIN_PASSWORD" jq -cn '{password: env.P}')"; then
+      ok "Tenant $TENANT_ORG_NAME activated: $TENANT_ADMIN_EMAIL's password set from TENANT_ADMIN_PASSWORD"; APPLIED=$((APPLIED + 1))
+    else
+      warn "Could not set $TENANT_ADMIN_EMAIL's password ($(api_error)); check it against the password rules."; FAILED=$((FAILED + 1))
+    fi
+    API_TOKEN=$saved; return 0
+  fi
+  # Shown on the console only, never logged: the link sets the tenant admin's password.
+  logf INFO "Tenant $TENANT_ORG_NAME's activation link shown on the console (not logged)"
+  printf '\n  Activation link for %s (%s); open it once to set their password:\n    %s\n' "$TENANT_ORG_NAME" "$TENANT_ADMIN_EMAIL" "$link"
+  if [[ "$link" =~ ^https?://[^/]+(/.*)$ ]]; then
+    printf '  Through ./connect.sh console:\n    https://localhost:8443%s\n\n' "${BASH_REMATCH[1]}"
+  fi
+  NEXT+=("Open the activation link above to set $TENANT_ADMIN_EMAIL's password (or set TENANT_ADMIN_PASSWORD and re-run to have configure.sh set it).")
+}
+
 configure_tenant_settings() {
   local t="/v1/tenants/$TENANT_UID"
   local p=${TENANT_ALLOW_NON_FIPS_PACKS:-false} i=${TENANT_ALLOW_NON_FIPS_CLUSTER_IMPORT:-false} f=${TENANT_ALLOW_NON_FIPS_CLUSTER_FEATURES:-false}
