@@ -9,6 +9,9 @@ kubeconfig-*
 # Written by deploy.sh: this deployment's resource IDs.
 outputs-*.txt
 
+# Run logs written by every script.
+logs/
+
 # Working drafts, not part of the tooling.
 bug-*.md
 

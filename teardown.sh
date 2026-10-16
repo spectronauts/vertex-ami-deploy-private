@@ -7,6 +7,7 @@
 #   --nlb-only  delete just the NLB and its listeners; keep target groups and everything else
 
 set -euo pipefail
+SCRIPT_ARGS=("$@")
 NLB_ONLY="false"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,7 +24,8 @@ require_aws
 retry() {  # tries what command...  (network interfaces take a while to release)
   local tries=$1 what=$2 i; shift 2
   for ((i = 1; i <= tries; i++)); do
-    "$@" >/dev/null 2>&1 && return 0
+    if "$@" >/dev/null 2>&1; then logf INFO "$what: done (attempt $i)"; return 0; fi
+    logf INFO "$what: attempt $i of $tries failed (see the error above); retrying in 15s"
     sleep 15
   done
   warn "Could not $what; delete it manually."
@@ -33,7 +35,8 @@ if [[ "$NLB_ONLY" == "true" ]]; then
   NLB_ARN=$(nlb_arn)
   [[ -n "$NLB_ARN" ]] || { log "No ${NAME_PREFIX}-nlb to delete."; exit 0; }
   read -r -p "Delete ${NAME_PREFIX}-nlb (private IP $(nlb_private_ip "$NLB_ARN")) and its listeners? Type the NAME_PREFIX ($NAME_PREFIX): " answer
-  [[ "$answer" == "$NAME_PREFIX" ]] || { echo "Cancelled."; exit 1; }
+  logf INFO "Confirmation typed: '$answer'"
+  [[ "$answer" == "$NAME_PREFIX" ]] || { echo "Cancelled."; logf INFO "Cancelled"; exit 1; }
   log "Deleting NLB ${NAME_PREFIX}-nlb (target groups kept)"
   aws elbv2 delete-load-balancer --load-balancer-arn "$NLB_ARN"
   aws elbv2 wait load-balancers-deleted --load-balancer-arns "$NLB_ARN"
@@ -42,10 +45,27 @@ if [[ "$NLB_ONLY" == "true" ]]; then
 fi
 
 VPC_ID=$(vpc_id)
+# For the log: what exists before anything is deleted.
+logf INFO "Inventory of '$NAME_PREFIX' before teardown (VPC ${VPC_ID:-not found}):"
+log_detail aws ec2 describe-instances --filters "Name=tag:$TAG_KEY,Values=$NAME_PREFIX" --output json --query \
+    'Reservations[].Instances[].{Name:Tags[?Key==`Name`]|[0].Value,Id:InstanceId,State:State.Name,Ip:PrivateIpAddress,Volumes:BlockDeviceMappings[].Ebs.VolumeId}'
+log_detail aws elbv2 describe-load-balancers --names "${NAME_PREFIX}-nlb" --output json \
+    --query 'LoadBalancers[].{Arn:LoadBalancerArn,State:State.Code,Dns:DNSName}'
+log_detail aws ec2 describe-instance-connect-endpoints --filters "Name=tag:$TAG_KEY,Values=$NAME_PREFIX" --output json \
+    --query 'InstanceConnectEndpoints[].{Id:InstanceConnectEndpointId,State:State}'
+if [[ -n "$VPC_ID" ]]; then
+  log_detail aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --output json \
+      --query 'VpcEndpoints[].{Id:VpcEndpointId,Service:ServiceName,State:State}'
+  log_detail aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --output json --query 'Subnets[].{Id:SubnetId,Cidr:CidrBlock}'
+  log_detail aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --output json --query 'SecurityGroups[].{Id:GroupId,Name:GroupName}'
+  log_detail aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --output json \
+      --query 'NetworkInterfaces[].{Id:NetworkInterfaceId,Type:InterfaceType,Status:Status,Ip:PrivateIpAddress,Description:Description}'
+fi
 echo "This permanently deletes the '$NAME_PREFIX' deployment in $REGION: the NLB, all instances"
 echo "and their volumes, the access path, and the VPC ${VPC_ID:-<not found>} with everything in it."
 read -r -p "Type the NAME_PREFIX ($NAME_PREFIX) to continue: " answer
-[[ "$answer" == "$NAME_PREFIX" ]] || { echo "Cancelled."; exit 1; }
+logf INFO "Confirmation typed: '$answer'"
+[[ "$answer" == "$NAME_PREFIX" ]] || { echo "Cancelled."; logf INFO "Cancelled"; exit 1; }
 
 # 1. NLB and target groups
 NLB_ARN=$(nlb_arn)

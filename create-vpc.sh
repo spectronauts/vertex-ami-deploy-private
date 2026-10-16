@@ -7,6 +7,7 @@
 # Usage: ./create-vpc.sh [-c config.env]
 
 set -euo pipefail
+SCRIPT_ARGS=("$@")
 [[ "${1:-}" == "-c" ]] && CONFIG="$2"
 cd "$(dirname "$0")"
 # shellcheck source=lib.sh
@@ -17,12 +18,15 @@ pick_az() {
   local zones z types="$INSTANCE_TYPE" want=1
   [[ "$ACCESS_METHOD" == "ssm" && "$JUMP_INSTANCE_TYPE" != "$INSTANCE_TYPE" ]] && { types="$INSTANCE_TYPE,$JUMP_INSTANCE_TYPE"; want=2; }
   zones=$(aws_q ec2 describe-availability-zones --filters "Name=state,Values=available" --query 'AvailabilityZones[].ZoneName')
+  logf INFO "Looking for a zone that offers $types among: $(echo $zones)"
   for z in $zones; do
     if aws_q ec2 describe-instance-type-offerings --location-type availability-zone \
          --filters "Name=location,Values=$z" "Name=instance-type,Values=$types" \
          --query 'length(InstanceTypeOfferings)' | grep -qx "$want"; then
+      logf INFO "Picked $z"
       echo "$z"; return
     fi
+    logf INFO "$z doesn't offer $types"
   done
   die "No zone in $REGION offers $types."
 }
@@ -71,5 +75,8 @@ aws ec2 associate-route-table --route-table-id "$RTB" --subnet-id "$PRIVATE_ID" 
     --query 'InternetGateways[0].InternetGatewayId')")" ]] \
   || die "$VPC_ID has an internet gateway attached; this deployment allows none."
 ok "Route table $RTB: no default route; no internet gateway in the VPC"
+log_detail aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --output json --query 'Vpcs[0].{Id:VpcId,Cidr:CidrBlock,State:State,Tags:Tags}'
+log_detail aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --output json \
+    --query 'RouteTables[].{Id:RouteTableId,Routes:Routes,Associations:Associations[].SubnetId}'
 
 log "Network ready. Next: ./deploy.sh --no-nlb"

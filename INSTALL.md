@@ -420,6 +420,11 @@ clusters:
 | `mongo-0` stuck in `Init:0/1`, "mongo.key is empty"; configserver crash-looping | Helm re-applies the MongoDB key secret empty during install | Set the key (below) |
 | A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume too small); the node can't pull them back | Redeploy with root volumes of at least 300 GB (Step 5) |
 
+**Logs.** Each script run writes a log in `logs/` and prints its path when it starts, and
+again if it fails. The log records every AWS call with its full error, every Local UI API
+call, and the command that stopped the run. Passwords and tokens appear as `<redacted>`.
+Start there when a step fails, and include the log when you ask for help.
+
 **Set the MongoDB key:**
 
 ```

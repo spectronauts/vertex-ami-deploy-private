@@ -17,6 +17,7 @@
 #             Deploy Cluster, then run ./deploy.sh to create the NLB on that IP.
 
 set -euo pipefail
+SCRIPT_ARGS=("$@")
 PREFLIGHT_ONLY="false"
 NO_NLB="false"
 while [[ $# -gt 0 ]]; do
@@ -53,12 +54,15 @@ preflight() {
     [[ -n "${!v:-}" ]] || die "$v is required in $CONFIG."
   done
   [[ "$ACCESS_METHOD" == "eice" || "$ACCESS_METHOD" == "ssm" ]] || die "ACCESS_METHOD must be eice or ssm."
+  logf INFO "Mode: preflight-only=$PREFLIGHT_ONLY, no-nlb=$NO_NLB"
   require_aws
   ok "Authenticated as $CALLER_ARN ($OS $ARCH)"
 
   [[ "$(aws_q ec2 describe-images --image-ids "$AMI_ID" --query 'Images[0].State')" == "available" ]] \
     || die "AMI $AMI_ID is not available in $REGION."
   ROOT_DEVICE=$(aws_q ec2 describe-images --image-ids "$AMI_ID" --query 'Images[0].RootDeviceName')
+  log_detail aws ec2 describe-images --image-ids "$AMI_ID" --output json --query \
+      'Images[0].{Name:Name,Description:Description,Created:CreationDate,Owner:OwnerId,Arch:Architecture,Root:RootDeviceName,Disks:BlockDeviceMappings}'
   ok "AMI $AMI_ID available"
   # Two floors (INSTALL.md Step 5). Below about 40 GB the AMI's first-boot reset can't add its
   # 19,780 MiB COS_STATE partition and the node stays in Kairos recovery. Below 300 GB the
@@ -77,6 +81,7 @@ preflight() {
   ok "Root volume $ROOT_DEVICE: $ROOT_VOLUME_SIZE_GB GB"
   aws_q ec2 describe-key-pairs --key-names "$KEY_NAME" >/dev/null || die "Key pair '$KEY_NAME' not found."
   ok "Key pair $KEY_NAME found"
+  check_ssh_key
 
   [[ -f "$USER_DATA_FILE" ]] || die "$USER_DATA_FILE not found. Copy user-data.yaml.example and set the password and SSH key."
   [[ "$(head -1 "$USER_DATA_FILE")" == "#cloud-config" ]] || die "$USER_DATA_FILE must start with '#cloud-config'."
@@ -84,6 +89,9 @@ preflight() {
     || die "Replace the placeholder SSH key in $USER_DATA_FILE with your public key."
   grep -Eq '^[[:space:]]+passwd:[[:space:]]*fusion[[:space:]]*$' "$USER_DATA_FILE" \
     && warn "$USER_DATA_FILE still uses the sample password."
+  # For the log: the file's shape, never its passwords.
+  logf INFO "$USER_DATA_FILE: $(wc -c <"$USER_DATA_FILE" | tr -d ' ') bytes, sha256 $(_sha256 "$USER_DATA_FILE"), top-level keys: $(grep -Eo '^[A-Za-z_][A-Za-z0-9_-]*:' "$USER_DATA_FILE" | tr -d ':' | tr '\n' ' ')"
+  logf INFO "$USER_DATA_FILE: $(grep -cE '^[[:space:]]+passwd:' "$USER_DATA_FILE" || true) passwd line(s), $(grep -cE '(ssh-(rsa|ed25519)|ecdsa-sha2-)' "$USER_DATA_FILE" || true) SSH public key(s)"
   ok "User data $USER_DATA_FILE"
 
   VPC_ID=$(vpc_id); PRIVATE_ID=$(subnet_id private)
@@ -95,6 +103,10 @@ preflight() {
   [[ -z "$(none_to_empty "$(aws_q ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
       --query 'InternetGateways[0].InternetGatewayId')")" ]] || die "$VPC_ID has an internet gateway; this deployment allows none."
   ok "VPC $VPC_ID, private subnet $PRIVATE_ID in $AZ; no internet gateway, no default route"
+  log_detail aws ec2 describe-subnets --subnet-ids "$PRIVATE_ID" --output json \
+      --query 'Subnets[0].{Cidr:CidrBlock,Az:AvailabilityZone,FreeIPs:AvailableIpAddressCount,PublicIpOnLaunch:MapPublicIpOnLaunch}'
+  log_detail aws ec2 describe-instances --filters "Name=tag:$TAG_KEY,Values=$NAME_PREFIX" --output json --query \
+      'Reservations[].Instances[].{Name:Tags[?Key==`Name`]|[0].Value,Id:InstanceId,State:State.Name,Ip:PrivateIpAddress,Launched:LaunchTime}'
 
   usable_ip "$NLB_PRIVATE_IP" "$PRIVATE_CIDR" || die "NLB_PRIVATE_IP $NLB_PRIVATE_IP is not a usable address in $PRIVATE_CIDR."
   local arn current
@@ -135,6 +147,7 @@ ensure_sg() {  # role description -> id
 }
 
 rule() {  # ingress|egress sg protocol port(or "all") peer-sg|cidr description
+  # Re-runs get InvalidPermission.Duplicate for rules already there; the log shows each result.
   local dir=$1 sg=$2 proto=$3 port=$4 peer=$5 desc=$6 perm
   if [[ "$proto" == "all" ]]; then perm="IpProtocol=-1"; else perm="IpProtocol=$proto,FromPort=$port,ToPort=$port"; fi
   if [[ "$peer" == sg-* ]]; then
@@ -174,6 +187,8 @@ ensure_security_groups() {
     rule egress  "$APP_SG" all all "$APP_SG" "node to node"
   fi
   ok "Rules applied (node to node: $NODE_TO_NODE)"
+  log_detail aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:$TAG_KEY,Values=$NAME_PREFIX" \
+      --output json --query 'SecurityGroups[].{Name:GroupName,Id:GroupId,In:IpPermissions,Out:IpPermissionsEgress}'
 }
 
 # ---------------------------------------------------------------------------
@@ -197,6 +212,7 @@ wait_eice() {
   for i in $(seq 1 40); do
     state=$(aws_q ec2 describe-instance-connect-endpoints --instance-connect-endpoint-ids "$EICE_ID" \
         --query 'InstanceConnectEndpoints[0].State')
+    logf INFO "EC2 Instance Connect Endpoint $EICE_ID: ${state:-unknown} (check $i of 40)"
     [[ "$state" == "create-complete" ]] && break
     sleep 15
   done
@@ -260,6 +276,7 @@ wait_ssm() {
   for i in $(seq 1 30); do
     status=$(aws_q ssm describe-instance-information --filters "Key=InstanceIds,Values=$JUMP_ID" \
         --query 'InstanceInformationList[0].PingStatus')
+    logf INFO "Jump host $JUMP_ID Session Manager status: ${status:-not registered} (check $i of 30)"
     [[ "$status" == "Online" ]] && break
     sleep 15
   done
@@ -281,6 +298,8 @@ ensure_nodes() {
   log "Appliance nodes ($APP_COUNT x $INSTANCE_TYPE)"
   local n id
   APP_IDS=()
+  logf INFO "Block devices for new nodes: $(block_device_json)"
+  logf INFO "User data for new nodes: $USER_DATA_FILE (sha256 $(_sha256 "$USER_DATA_FILE"))"
   for ((n = 1; n <= APP_COUNT; n++)); do
     id=$(instance_id "node-$n")
     if [[ -z "$id" ]]; then
@@ -300,6 +319,8 @@ ensure_nodes() {
   done
   aws ec2 wait instance-running --instance-ids "${APP_IDS[@]}"
   ok "All nodes running"
+  log_detail aws ec2 describe-instances --instance-ids "${APP_IDS[@]}" --output json --query \
+      'Reservations[].Instances[].{Name:Tags[?Key==`Name`]|[0].Value,Id:InstanceId,Type:InstanceType,State:State.Name,Ip:PrivateIpAddress,Az:Placement.AvailabilityZone,Launched:LaunchTime,Volumes:BlockDeviceMappings[].[DeviceName,Ebs.VolumeId]}'
 }
 
 # ---------------------------------------------------------------------------
@@ -345,17 +366,20 @@ ensure_nlb() {
   done
 
   wait_nlb_active
+  log_detail aws elbv2 describe-listeners --load-balancer-arn "$NLB_ARN" --output json \
+      --query 'Listeners[].{Port:Port,Protocol:Protocol,TargetGroup:DefaultActions[0].TargetGroupArn}'
   NLB_DNS=$(aws_q elbv2 describe-load-balancers --load-balancer-arns "$NLB_ARN" --query 'LoadBalancers[0].DNSName')
   ok "NLB active: $NLB_DNS ($(nlb_private_ip "$NLB_ARN"))"
 }
 
 wait_nlb_active() {  # one live line (state and elapsed time) until NLB_ARN is active
-  local start=$SECONDS tick=0 state="" el
+  local start=$SECONDS tick=0 state="" el last=""
   log "Waiting for the NLB to become active (usually 2-5 minutes)"
   while :; do
     el=$(elapsed $((SECONDS - start)))
     if (( tick % 20 == 0 )); then                      # ask AWS every 5 seconds
       state=$(aws_q elbv2 describe-load-balancers --load-balancer-arns "$NLB_ARN" --query 'LoadBalancers[0].State.Code')
+      if [[ "$state" != "${last:-}" ]]; then logf INFO "NLB ${NAME_PREFIX}-nlb: ${state:-unknown} after $el"; last=$state; fi
       case "$state" in
         active) break ;;
         active_impaired) warn "NLB is active but impaired."; break ;;
@@ -387,6 +411,8 @@ summary() {
     echo "NLB_DNS=$NLB_DNS"
     echo "VIP=$NLB_PRIVATE_IP"
   } > "$OUTPUT_FILE"
+  logf INFO "Wrote $OUTPUT_FILE:"
+  log_file out "$OUTPUT_FILE"
 
   log "Done. Outputs saved to $OUTPUT_FILE"
   cat <<EOF

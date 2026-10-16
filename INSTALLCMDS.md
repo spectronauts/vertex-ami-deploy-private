@@ -140,6 +140,14 @@ kubectl --kubeconfig <file> config set-cluster kubernetes \
 
 ## Troubleshooting
 
+Every run writes a log in `logs/` (passwords and tokens masked). The newest, and following
+one live:
+
+```bash
+ls -t logs/ | head -5
+tail -f "$(ls -t logs/*.log | head -1)"
+```
+
 Node status check stays "impaired" after its reset:
 
 ```bash

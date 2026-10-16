@@ -7,6 +7,7 @@
 #            node (Ctrl-C to stop)
 
 set -euo pipefail
+SCRIPT_ARGS=("$@")
 WATCH="false"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,7 +38,7 @@ watch_nlb() {  # one line for the NLB and one per port, redrawn until all are do
   local start=$SECONDS tick=0 n i h t rest arn="" ip="" state="" all=0 drawn=0 el
   # shellcheck disable=SC2206
   local ports=($APP_PORTS)
-  local text=() done_=() tgs=() shown=()
+  local text=() done_=() tgs=() shown=() logged=()
   n=$((${#ports[@]} + 1))
   log "Watching the NLB and target health (Ctrl-C to stop)"
   while :; do
@@ -61,6 +62,9 @@ watch_nlb() {  # one line for the NLB and one per port, redrawn until all are do
         read -r h t rest <<<"$(port_health "${tgs[$i]}")"
         text[$((i + 1))]="port ${ports[$i]}: $h/$t healthy${rest:+ ($rest)}"
         if [[ $t -gt 0 && $h -eq $t ]]; then done_[$((i + 1))]=1; else done_[$((i + 1))]=0; all=0; fi
+      done
+      for ((i = 0; i < n; i++)); do                    # the log gets every change, terminal or not
+        if [[ "${logged[$i]:-}" != "${text[$i]}" ]]; then logf INFO "${text[$i]} (after $el)"; logged[$i]=${text[$i]}; fi
       done
     fi
     if [[ -t 1 ]]; then                                # redraw the lines in place
@@ -117,4 +121,7 @@ for port in $APP_PORTS; do
   [[ -n "$tg" ]] || { warn "tg-$port missing"; continue; }
   read -r h t rest <<<"$(port_health "$tg")"
   printf '  %-6s %s/%s healthy%s\n' "$port" "$h" "$t" "${rest:+ ($rest)}"
+  logf INFO "port $port: $h/$t healthy${rest:+ ($rest)}"
+  log_detail aws elbv2 describe-target-health --target-group-arn "$tg" --output json \
+      --query 'TargetHealthDescriptions[].{Id:Target.Id,State:TargetHealth.State,Reason:TargetHealth.Reason,Detail:TargetHealth.Description}'
 done

@@ -34,6 +34,7 @@ needs `curl` and `jq`.
 | `connect.sh` | `localui`, `link`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
 | `status.sh` | Instances, access path, NLB and target health; `--watch` updates live until all are healthy |
 | `teardown.sh` | Deletes everything, VPC and IAM role included; `--nlb-only` deletes just the NLB |
+| `logs/` | One log per script run (see Logs) |
 
 ## Run
 
@@ -61,6 +62,25 @@ your Ubuntu Pro token, and click **Deploy Cluster**. Right after:
 
 The NLB must not exist when you enter the VIP: Local UI refuses an IP that any device
 already owns, and an NLB's IP belongs to its network interface.
+
+## Logs
+
+Every run writes a log and prints its path first: `logs/<script>-<NAME_PREFIX>-<UTC time>.log`
+(`connect.sh` adds the command, as in `logs/connect-link-vxp-20261016T150000Z.log`). The
+console stays short; the log has the detail:
+
+- the run: arguments, config file and settings, workstation, tool versions, AWS identity
+- every AWS CLI call: its arguments, exit code, time taken, output, and any error, including
+  errors the console doesn't show
+- every Local UI API call `./connect.sh link` makes: method, path, HTTP status, time taken,
+  request and response
+- ssh and SSM forwards (with `ssh -v` output for `link`), kubectl steps, each check made
+  while waiting, and the AWS resources before `./teardown.sh` deletes them
+- where the run stopped and why, if it fails
+
+Passwords, Local UI sign-in tokens, link tokens and AWS secret keys are written as
+`<redacted>`, and only you can read the files. Set `LOG_DIR` in `config.env` to keep them
+elsewhere. To follow a run from another terminal: `tail -f "$(ls -t logs/*.log | head -1)"`.
 
 ## Known issues
 
