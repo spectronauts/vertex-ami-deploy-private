@@ -1,5 +1,6 @@
 # Secrets and per-deployment settings: copy the .example files and fill them in.
 config.env
+system.env
 user-data.yaml
 .fusion-password
 *.bak
@@ -17,3 +18,6 @@ logs/
 bug-*.md
 
 .DS_Store
+
+# Certificates and keys for system.env (TLS, reverse proxy, identity providers).
+certs/
