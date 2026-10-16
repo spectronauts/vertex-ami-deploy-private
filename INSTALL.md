@@ -483,10 +483,12 @@ through node 1, like `./connect.sh`; from a host that can reach VerteX directly,
 `--url https://<domain or VIP>`. Each change prints a check, and it ends with what is left
 for you:
 
-- **Activate the tenant:** in the system console (`./connect.sh console`), **Tenant
-  Management** > the tenant's menu > **Activate** shows the activation URL. Open it to set the tenant admin's password. Settings
-  only the tenant admin may change wait until you put that password in
-  `TENANT_ADMIN_PASSWORD` and run `./configure.sh` again.
+- **Tenant activation:** a tenant is active once its admin has set a password through the
+  tenant's one-time activation link (what the console's **Activate** shows). With
+  `TENANT_ADMIN_PASSWORD` set, `./configure.sh` does this itself, then applies the tenant
+  settings, as the tenant admin where the system admin may not. Without it, it prints the
+  link, and a `https://localhost:8443/...` copy for `./connect.sh console`, for the admin to
+  open.
 - **DNS:** point `DOMAIN_HOST` at the VIP.
 - **OIDC:** register the redirect URI it prints with your identity provider.
 

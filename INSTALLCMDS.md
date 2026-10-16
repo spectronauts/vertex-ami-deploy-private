@@ -173,9 +173,9 @@ cp system.env.example system.env && chmod 600 system.env    # fill in; only the 
 ./configure.sh                    # options: -c <file>  -s <system.env>  --url https://<host>  --dry-run
 ```
 
-Then, in the system console (`./connect.sh console`): **Tenant Management** > the tenant's menu > **Activate**, open the
-activation URL, and set the tenant admin's password. Put it in `TENANT_ADMIN_PASSWORD` and run
-`./configure.sh` again if it reported tenant settings waiting on the tenant admin.
+With `TENANT_ADMIN_PASSWORD` set, it activates the tenant (sets the admin's password through
+the activation link). Without it, it prints the activation link to open (through
+`./connect.sh console`: `https://localhost:8443/auth/password/.../activate`).
 
 ## Troubleshooting
 
