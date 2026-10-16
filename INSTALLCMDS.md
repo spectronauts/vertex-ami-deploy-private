@@ -158,6 +158,18 @@ kubectl --kubeconfig <file> config set-cluster kubernetes \
   --server=https://localhost:6443 --tls-server-name=kubernetes
 ```
 
+## 10. Configure the system console and a tenant
+
+```bash
+cp system.env.example system.env && chmod 600 system.env    # fill in; only the admin block is required
+./configure.sh --dry-run          # check settings and sign in; change nothing
+./configure.sh                    # options: -c <file>  -s <system.env>  --url https://<host>  --dry-run
+```
+
+Then, in the system console: **Tenant Management** > the tenant's menu > **Activate**, open the
+activation URL, and set the tenant admin's password. Put it in `TENANT_ADMIN_PASSWORD` and run
+`./configure.sh` again if it reported tenant settings waiting on the tenant admin.
+
 ## Troubleshooting
 
 Every run writes a log in `logs/` (passwords and tokens masked). The newest, and following

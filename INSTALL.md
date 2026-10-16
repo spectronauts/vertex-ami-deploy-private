@@ -51,6 +51,7 @@ For just the commands, see [INSTALLCMDS.md](INSTALLCMDS.md).
 - **Watch it come up:** 6443, then 30003, then 443 turn healthy on all nodes. If `mongo-0`
   sticks in `Init` with "mongo.key is empty", set the key (Troubleshooting).
 - **Validate.**
+- **Configure the system console and a tenant:** `./configure.sh` from `system.env` (Step 10).
 
 ---
 
@@ -434,6 +435,48 @@ clusters:
     tls-server-name: kubernetes                # added
   name: kubernetes
 ```
+
+---
+
+## Step 10 - Configure the system console and a tenant
+
+`./configure.sh` signs in to the VerteX system console through its API and applies the
+settings in `system.env`. Copy `system.env.example` to `system.env`, keep it private
+(`chmod 600 system.env`), and fill in what you need. Each setting has a one-line description
+there; only the system admin block is required.
+
+| Area | Settings |
+| --- | --- |
+| System admin | First-login password change and email (a new install's admin password is `admin`) |
+| Activation | The activation key Spectro Cloud support gives you for the product ID |
+| Domain and TLS | The FQDN users reach VerteX at, and its certificate, key and CA (PEM files) |
+| SMTP | Mail server for tenant activation, password resets and alerts |
+| Proxies | Outbound HTTP/HTTPS proxy; reverse proxy (Spectro Proxy) with its certificates |
+| Banners | Login banner; classification banner |
+| Security | Session length, password rules, password blocklist |
+| Admins and backups | More system admins; scheduled database backups to S3 or FTP |
+| Tenant | A tenant and its first admin; FIPS settings, password rules, login banner, CA certificates, OIDC or SAML sign-on |
+
+```
+./configure.sh --dry-run      # check the settings and sign in; change nothing
+./configure.sh
+```
+
+It checks every setting first (names, values, files, certificates and their expiry and names)
+and stops before changing anything if one is wrong. It reaches VerteX on the VIP's port 443
+through node 1, like `./connect.sh`; from a host that can reach VerteX directly, add
+`--url https://<domain or VIP>`. Each change prints a check, and it ends with what is left
+for you:
+
+- **Activate the tenant:** in the system console, **Tenant Management** > the tenant's menu >
+  **Activate** shows the activation URL. Open it to set the tenant admin's password. Settings
+  only the tenant admin may change wait until you put that password in
+  `TENANT_ADMIN_PASSWORD` and run `./configure.sh` again.
+- **DNS:** point `DOMAIN_HOST` at the VIP.
+- **OIDC:** register the redirect URI it prints with your identity provider.
+
+It is safe to run again: what is in place is kept or set to the same value. Passwords, keys
+and tokens never reach the run log.
 
 ---
 

@@ -191,7 +191,7 @@ source "$CONFIG"
 : "${DATA_VOLUME_COUNT:=1}" "${DATA_VOLUME_SIZE_GB:=500}"
 : "${USER_DATA_FILE:=user-data.yaml}" "${NODE_TO_NODE:=true}" "${PRESERVE_CLIENT_IP:=false}" "${NLB_PRIVATE_IP:=}"
 : "${ACCESS_METHOD:=eice}" "${JUMP_INSTANCE_TYPE:=t3.micro}" "${SSH_USER:=kairos}" "${SSH_KEY_FILE:=}"
-: "${LOCALUI_USER:=}"
+: "${LOCALUI_USER:=}" "${AMI_ID:=}" "${KEY_NAME:=}"
 # A leading ~ inside quotes ("~/keys/x.pem") isn't expanded by the shell; expand it here.
 SSH_KEY_FILE="${SSH_KEY_FILE/#\~/$HOME}"
 USER_DATA_FILE="${USER_DATA_FILE/#\~/$HOME}"
@@ -254,7 +254,7 @@ check_config() {  # sets CONFIG_PROBLEMS
   if [[ ! "$REGION" =~ ^[a-z]{2}(-gov|-iso[a-z]*)?-[a-z]+-[0-9]$ ]]; then bad+=("REGION '$REGION' is not an AWS region name (for example us-gov-west-1)."); fi
   if [[ ! "$NAME_PREFIX" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,18}[A-Za-z0-9])?$ ]]; then
     bad+=("NAME_PREFIX '$NAME_PREFIX': use up to 20 letters, digits and dashes, not starting or ending with a dash."); fi
-  if [[ -n "$AMI_ID" && ! "$AMI_ID" =~ ^ami-[0-9a-f]{8,17}$ ]]; then bad+=("AMI_ID '$AMI_ID' is not an AMI ID (ami-0123456789abcdef0)."); fi
+  if [[ -n "${AMI_ID:-}" && ! "${AMI_ID:-}" =~ ^ami-[0-9a-f]{8,17}$ ]]; then bad+=("AMI_ID '$AMI_ID' is not an AMI ID (ami-0123456789abcdef0)."); fi
   if [[ "$ACCESS_METHOD" != eice && "$ACCESS_METHOD" != ssm ]]; then bad+=("ACCESS_METHOD '$ACCESS_METHOD': use eice or ssm."); fi
   if [[ ! "$APP_COUNT" =~ ^[1-9]$ ]]; then bad+=("APP_COUNT '$APP_COUNT': use 3 for a cluster or 1 for a single node."); fi
   if [[ ! "$INSTANCE_TYPE" =~ ^[a-z][a-z0-9-]*\.[a-z0-9]+$ ]]; then bad+=("INSTANCE_TYPE '$INSTANCE_TYPE' is not an instance type (m5.2xlarge)."); fi
