@@ -14,28 +14,34 @@ ssh-keygen -y -f <key>.pem                  # prints the public key for ssh_auth
 Settings in `config.env`:
 
 ```bash
-# Set these
+# REQUIRED
 REGION="us-gov-west-1"
-NAME_PREFIX="vxp"                 # unique per deployment; up to 20 letters, digits, dashes
+NAME_PREFIX="vxp"                    # unique per deployment; up to 20 letters, digits, dashes
 AMI_ID="<appliance-ami-id>"
-KEY_NAME="<key-pair-name>"        # EC2 key pair; installed for kairos
-SSH_KEY_FILE="<path-to-key.pem>"  # KEY_NAME's private key
-NLB_PRIVATE_IP="10.0.11.210"      # the VIP: a free IP in PRIVATE_CIDR
+KEY_NAME="<key-pair-name>"           # EC2 key pair; installed for kairos
+SSH_KEY_FILE="<path-to-key.pem>"     # KEY_NAME's private key
+NLB_PRIVATE_IP="10.0.11.210"         # the VIP: a free IP in PRIVATE_CIDR
 
-# Optional (defaults shown)
-# ACCESS_METHOD="eice"            # eice | ssm
-# APP_COUNT=3                     # 3 | 1
-# INSTANCE_TYPE="m5.2xlarge"
-# ROOT_VOLUME_SIZE_GB=300         # at least 300
-# DATA_VOLUME_SIZE_GB=500
-# USER_DATA_FILE="user-data.yaml"
-# AZ=""                           # empty = first zone that offers INSTANCE_TYPE
-# VPC_CIDR="10.0.0.0/16"
-# PRIVATE_CIDR="10.0.11.0/24"
-# LOCALUI_USER=""                 # empty = the first user in user-data.yaml
-# SSH_USER="kairos"
-# JUMP_INSTANCE_TYPE="t3.micro"   # ssm only
-# LOG_DIR="logs"
+# OPTIONAL: nodes
+APP_COUNT="3"                        # 3 | 1
+INSTANCE_TYPE="m5.2xlarge"
+ROOT_VOLUME_SIZE_GB="300"            # at least 300
+DATA_VOLUME_SIZE_GB="500"
+USER_DATA_FILE="user-data.yaml"
+
+# OPTIONAL: network
+AZ=""                                # empty = first zone that offers INSTANCE_TYPE
+VPC_CIDR="10.0.0.0/16"
+PRIVATE_CIDR="10.0.11.0/24"
+
+# OPTIONAL: access
+ACCESS_METHOD="eice"                 # eice | ssm
+JUMP_INSTANCE_TYPE="t3.micro"        # ssm only
+SSH_USER="kairos"
+LOCALUI_USER=""                      # empty = the first user in user-data.yaml
+
+# OPTIONAL: logs
+LOG_DIR="logs"
 ```
 
 ## 2. Network

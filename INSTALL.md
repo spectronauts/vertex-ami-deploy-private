@@ -105,11 +105,12 @@ cp config.env.example config.env
 cp user-data.yaml.example user-data.yaml
 ```
 
-- **`config.env`:** set the six values at the top: `REGION`, `NAME_PREFIX` (unique per
+- **`config.env`:** set the six values under REQUIRED: `REGION`, `NAME_PREFIX` (unique per
   deployment), `AMI_ID`, `KEY_NAME` (your EC2 key pair), `SSH_KEY_FILE` (its private key) and
-  `NLB_PRIVATE_IP` (the VIP: a free IP in the private subnet). The optional settings below
-  them show their defaults; uncomment one to change it, for example `ACCESS_METHOD="ssm"`.
-  Every script checks the settings first and names any it can't use.
+  `NLB_PRIVATE_IP` (the VIP: a free IP in the private subnet). The OPTIONAL settings (nodes,
+  network, access, logs) already have working values; change one only if you need to, for
+  example `ACCESS_METHOD="ssm"`. Every script checks the settings first and names any it
+  can't use.
 - **`user-data.yaml`:** set your Local UI user's password and SSH public key (Step 5).
 
 ---
