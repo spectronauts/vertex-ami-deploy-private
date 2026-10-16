@@ -11,5 +11,5 @@ stages:
           lock_passwd: false
           sudo: ALL=(ALL) NOPASSWD:ALL
           ssh_authorized_keys:
-            - ssh-rsa abc@spectrocloud.com
+            - ssh-rsa abc@spectrocloud.com #ssh-keygen -y -f /path/to/your-aws-keypair.pem
       name: "create admin user"
