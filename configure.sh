@@ -540,14 +540,30 @@ tenant_get() {  # path: GET as the system admin, else as the tenant admin; 0 if 
   return 1
 }
 
+find_tenant() {  # org-name: sets TENANT_UID and TENANT_ACTIVE, reading the tenant list 100 at a time
+  local cont="" page q                       # (VerteX refuses a limit over 100)
+  TENANT_UID=""; TENANT_ACTIVE=false
+  for ((page = 1; page <= 100; page++)); do
+    q="/v1/tenants?limit=100"
+    if [[ -n "$cont" ]]; then q+="&continue=$(jq -rn --arg c "$cont" '$c | @uri')"; fi
+    api GET "$q" || return 1
+    TENANT_UID=$(O="$1" jq -r '[.items[]? | select(.spec.orgName == env.O)][0].metadata.uid // empty' <<<"$API_BODY")
+    if [[ -n "$TENANT_UID" ]]; then
+      TENANT_ACTIVE=$(O="$1" jq -r '[.items[]? | select(.spec.orgName == env.O)][0].status.isActive // false' <<<"$API_BODY")
+      return 0
+    fi
+    cont=$(jq -r '.listmeta.continue // empty' <<<"$API_BODY")
+    [[ -n "$cont" ]] || return 0
+  done
+}
+
 configure_tenant() {
   local active
   [[ -n "${TENANT_ORG_NAME:-}" ]] || return 0
   log "Tenant $TENANT_ORG_NAME"
   SYSTEM_TOKEN=$API_TOKEN
-  api GET "/v1/tenants?limit=500" || die "Could not list tenants ($(api_error))."
-  TENANT_UID=$(O="$TENANT_ORG_NAME" jq -r '[.items[]? | select(.spec.orgName == env.O)][0].metadata.uid // empty' <<<"$API_BODY")
-  active=$(O="$TENANT_ORG_NAME" jq -r '[.items[]? | select(.spec.orgName == env.O)][0].status.isActive // false' <<<"$API_BODY")
+  find_tenant "$TENANT_ORG_NAME" || die "Could not list tenants ($(api_error))."
+  active=$TENANT_ACTIVE
   if [[ -n "$TENANT_UID" ]]; then
     ok "Tenant $TENANT_ORG_NAME exists ($TENANT_UID)"
   else
