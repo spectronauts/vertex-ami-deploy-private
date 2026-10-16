@@ -197,6 +197,8 @@ SSH_KEY_FILE="${SSH_KEY_FILE/#\~/$HOME}"
 USER_DATA_FILE="${USER_DATA_FILE/#\~/$HOME}"
 : "${JUMP_AMI_SSM_PARAM:=/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}"
 
+# Which settings this run uses, first thing, so a run from the wrong directory is obvious.
+printf '  Config: %s (NAME_PREFIX=\033[1m%s\033[0m, REGION=%s)\n' "${CONFIG_PATH/#$HOME/~}" "$NAME_PREFIX" "${REGION:-not set}"
 log_init
 
 [[ -n "${REGION:-}" ]] || die "REGION is required in $CONFIG (for example us-gov-west-1)."
@@ -466,4 +468,63 @@ wait_port() {  # local-port [process-output-file]: wait until something listens 
   done
   if [[ -s "${2:-}" ]]; then warn "Forward output: $(tail -3 "$2" | tr '\n' ' ')"; fi
   die "Nothing listening on localhost:$1 after 30 seconds."
+}
+
+free_port() { local p=$1; while port_open localhost "$p"; do p=$((p + 1)); done; echo "$p"; }  # first free local port from $1
+port_wait() { local i; for ((i = 0; i < $2; i++)); do port_open localhost "$1" && return 0; sleep 1; done; return 1; }  # port seconds
+
+NODE_SSH_PORTS=()   # ssm: local port forwarded to each node's port 22
+node_ssh() {  # [--quiet] index command: run command on node index+1 (IDS/IPS) as SSH_USER, never prompting
+  # stdout is returned; the command, exit code, time, output (unless --quiet) and errors are logged.
+  local quiet="" rc=0 outf errf t0 n
+  if [[ "$1" == --quiet ]]; then quiet=1; shift; fi
+  n=$1; shift
+  outf=$(mktemp "$_LOG_TMP/ssh.XXXXXX"); errf="$outf.err"; t0=$(_clock)
+  if [[ "$ACCESS_METHOD" == "eice" ]]; then
+    if [[ -z "${EICE_OPTS+set}" ]]; then eice_opts; fi
+    ssh "${EICE_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=30 "$SSH_USER@${IDS[$n]}" "$1" >"$outf" 2>"$errf" || rc=$?
+  else
+    need_key
+    if [[ -z "${NODE_SSH_PORTS[$n]:-}" ]] || ! port_open localhost "${NODE_SSH_PORTS[$n]}"; then
+      KILL_JOBS_ON_EXIT=true; SSM_QUIET=true
+      NODE_SSH_PORTS[$n]=$(free_port $((12222 + n)))
+      ssm_forward "${IPS[$n]}" 22 "${NODE_SSH_PORTS[$n]}"; port_wait "${NODE_SSH_PORTS[$n]}" 30 || true
+    fi
+    ssh -i "$SSH_KEY_FILE" -p "${NODE_SSH_PORTS[$n]}" -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null "$SSH_USER@localhost" "$1" >"$outf" 2>"$errf" || rc=$?
+  fi
+  logf DEBUG "ssh node $((n + 1)) (${IDS[$n]}): ${1//$'\n'/; }  -> exit $rc in $(_took "$t0")"
+  if [[ -z "$quiet" ]]; then log_file out "$outf"; else logf DEBUG "  (output not logged: $(wc -c <"$outf" | tr -d ' ') bytes)"; fi
+  log_file err "$errf"
+  cat "$outf"; rm -f "$outf" "$errf"
+  return $rc
+}
+
+# --- The data drive: the EBS volume attached as /dev/sdb, under the name the node's OS gives it -----
+# Nitro instance types (m5 and most current ones) present EBS volumes as NVMe devices: the root is
+# normally /dev/nvme0n1 and the data volume /dev/nvme1n1, but AWS doesn't guarantee that order, so
+# data_drive_script finds the volume on the node by its ID. Xen types present it as /dev/xvdb.
+# The cluster profile's Storage Pool Drive must name it.
+expected_data_drive() {  # nvme-support -> the device name the data volume normally gets
+  case "$1" in required|supported) echo /dev/nvme1n1 ;; *) echo /dev/xvdb ;; esac
+}
+data_drive_script() {  # volume-id -> a script for a node that prints "<device> <bytes> <volume-group or ->"
+  local v=${1//-/}   # an EBS volume's NVMe serial is its ID without the dash
+  cat <<EOF
+v=$v; dev=""
+if [ -e /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_\$v ]; then dev=\$(readlink -f /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_\$v); fi
+if [ -z "\$dev" ]; then for s in /sys/block/nvme*n1; do
+  if [ "\$(tr -d ' ' < \$s/device/serial 2>/dev/null)" = "\$v" ]; then dev=/dev/\${s##*/}; break; fi
+done; fi
+if [ -z "\$dev" ]; then for c in /dev/xvdb /dev/sdb; do if [ -b \$c ]; then dev=\$c; break; fi; done; fi
+if [ -z "\$dev" ]; then echo none; exit 0; fi
+echo "\$dev \$(lsblk -dnbo SIZE \$dev 2>/dev/null || echo 0) \$(sudo pvs --noheadings -o vg_name \$dev 2>/dev/null | tr -d ' ' | grep . || echo -)"
+EOF
+}
+save_output() {  # key value: set key=value in this deployment's outputs file
+  local tmp
+  tmp=$(mktemp "$_LOG_TMP/out.XXXXXX")
+  { if [[ -f "$OUTPUT_FILE" ]]; then grep -v "^$1=" "$OUTPUT_FILE" || true; fi; echo "$1=$2"; } >"$tmp"
+  cat "$tmp" >"$OUTPUT_FILE"; rm -f "$tmp"
+  logf INFO "$OUTPUT_FILE: $1=$2"
 }

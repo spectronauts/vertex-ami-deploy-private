@@ -31,7 +31,7 @@ needs `curl` and `jq`.
 | `user-data.yaml.example` | The airgap guide's user data (`fusion` user); copy to `user-data.yaml`, set password and key |
 | `create-vpc.sh` | VPC and one private subnet; refuses any internet gateway or default route |
 | `deploy.sh` | Security groups, the access path, the nodes, and (without `--no-nlb`) the NLB on the VIP |
-| `connect.sh` | `localui`, `link`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
+| `connect.sh` | `localui`, `link`, `disks`, `ssh [N]`, `api`, `kubeconfig`, `nodes` from your workstation |
 | `status.sh` | Instances, access path, NLB and target health; `--watch` updates live until all are healthy |
 | `teardown.sh` | Deletes everything, VPC and IAM role included; `--nlb-only` deletes just the NLB |
 | `logs/` | One log per script run (see Logs) |
@@ -48,12 +48,14 @@ cp user-data.yaml.example user-data.yaml       # set the password and your SSH p
 ./create-vpc.sh
 ./deploy.sh --no-nlb                           # everything except the NLB
 ./connect.sh localui                           # after ~25-30 min: https://localhost:5080, :5081, :5082
-./connect.sh link                              # links nodes 2 and 3 to node 1, waits until all are ready
+./connect.sh link                              # links nodes 2 and 3 to node 1, waits until all are ready,
+                                               # prints the data drive for Storage Pool Drive
 ```
 
 `./connect.sh link` signs in with the user and password from `user-data.yaml`. Then in Local
-UI on node 1 (`https://localhost:5080`), create the cluster with **VIP = `NLB_PRIVATE_IP`** and
-your Ubuntu Pro token, and click **Deploy Cluster**. Right after:
+UI on node 1 (`https://localhost:5080`), create the cluster with **VIP = `NLB_PRIVATE_IP`**, your
+Ubuntu Pro token, and **Storage Pool Drive = the data drive** `link` printed (`/dev/nvme1n1` on
+m5), and click **Deploy Cluster**. Right after:
 
 ```bash
 ./deploy.sh                                    # creates the NLB on the VIP

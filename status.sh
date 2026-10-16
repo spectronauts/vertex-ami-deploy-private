@@ -49,34 +49,15 @@ port_health() {  # target-group-arn -> "healthy total other-states"
 # with node 1's admin kubeconfig kept in the run's private scratch directory, never the log.
 # A failure is repaired only after it has lasted a while, so a normal install in progress is
 # never touched; each repair runs at most twice.
-IC_ON="false"; IC_KCFG=""; IC_PORT=""; IC_FWD_PID=""; IC_SSH_PORT=""; IC_NEXT_CONF=0; IC_PRINTED=0
+IC_ON="false"; IC_KCFG=""; IC_PORT=""; IC_FWD_PID=""; IC_NEXT_CONF=0; IC_PRINTED=0
 ST_TEXT="storage: waiting for Kubernetes on node 1"; ST_OK=0; ST_SINCE=""; ST_FIXES=0; ST_FIXED_AT=""; ST_WARNED=""
 MG_TEXT="MongoDB key: waiting for Kubernetes on node 1"; MG_OK=0; MG_SINCE=""; MG_FIXES=0
 STORAGE_STUCK_AFTER=300   # seconds the storage failure must last before the repair
 MONGO_STUCK_AFTER=180     # seconds mongo.key must stay empty (the key manager sets it in ~15s)
 
 ic_say() { IC_PRINTED=1; "$@"; }   # print during the watch (the live lines restart below it)
-free_port() { local p=$1; while port_open localhost "$p"; do p=$((p + 1)); done; echo "$p"; }
-port_wait() { local i; for ((i = 0; i < $2; i++)); do port_open localhost "$1" && return 0; sleep 1; done; return 1; }
-
-node1_ssh() {  # [--quiet] command: run it on node 1 (no prompts); stdout returned, all of it logged unless --quiet
-  local quiet="" rc=0 outf errf t0
-  if [[ "$1" == --quiet ]]; then quiet=1; shift; fi
-  outf=$(mktemp "$_LOG_TMP/ssh.XXXXXX"); errf="$outf.err"; t0=$(_clock)
-  if [[ "$ACCESS_METHOD" == "eice" ]]; then
-    ssh "${EICE_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=30 "$SSH_USER@${IDS[0]}" "$1" >"$outf" 2>"$errf" || rc=$?
-  else
-    if [[ -z "$IC_SSH_PORT" ]] || ! port_open localhost "$IC_SSH_PORT"; then
-      IC_SSH_PORT=$(free_port 12222); ssm_forward "${IPS[0]}" 22 "$IC_SSH_PORT"; port_wait "$IC_SSH_PORT" 30 || true
-    fi
-    ssh -i "$SSH_KEY_FILE" -p "$IC_SSH_PORT" -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null "$SSH_USER@localhost" "$1" >"$outf" 2>"$errf" || rc=$?
-  fi
-  logf DEBUG "ssh node 1 (${IDS[0]}): $1  -> exit $rc in $(_took "$t0")"
-  if [[ -z "$quiet" ]]; then log_file out "$outf"; else logf DEBUG "  (output not logged: $(wc -c <"$outf" | tr -d ' ') bytes)"; fi
-  log_file err "$errf"
-  cat "$outf"; rm -f "$outf" "$errf"
-  return $rc
+node1_ssh() {  # [--quiet] command: run it on node 1
+  if [[ "$1" == --quiet ]]; then node_ssh --quiet 0 "$2"; else node_ssh 0 "$1"; fi
 }
 kc() {  # [--quiet] kubectl-args...: kubectl on node 1's API server; logged (output too, unless --quiet)
   local quiet="" rc=0 outf errf t0

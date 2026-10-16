@@ -4,7 +4,9 @@
 # Usage: ./connect.sh [-c config.env] <command>
 #   localui      forward every node's Local UI: node N -> https://localhost:<5079+N>
 #   link         link nodes 2..N to node 1 through the Local UI API, no clicking; signs in as
-#                the user and password in USER_DATA_FILE (LOCALUI_USER, LOCALUI_PASSWORD override)
+#                the user and password in USER_DATA_FILE (LOCALUI_USER, LOCALUI_PASSWORD override);
+#                then checks each node's data drive (as disks does)
+#   disks        each node's data drive: the value for Storage Pool Drive in the cluster profile
 #   ssh [N]      shell on node N (default 1) as SSH_USER
 #   api          forward the VIP's Kubernetes API to https://localhost:6443 (for kubectl)
 #   kubeconfig [file]  copy node 1's admin kubeconfig, pointed at the api forward
@@ -23,8 +25,8 @@ SCRIPT_ARGS=("$@")
 CMD="${1:-}"; ARG="${2:-1}"
 cd "$(dirname "$0")"
 case "$CMD" in
-  nodes|localui|link|ssh|api|kubeconfig) LOG_NAME="connect-$CMD" ;;
-  *) sed -n '2,19p' "$0"; exit 2 ;;
+  nodes|localui|link|disks|ssh|api|kubeconfig) LOG_NAME="connect-$CMD" ;;
+  *) sed -n '2,20p' "$0"; exit 2 ;;
 esac
 # shellcheck source=lib.sh
 source ./lib.sh
@@ -33,6 +35,32 @@ require_aws
 # shellcheck disable=SC2207
 IDS=($(node_ids)); IPS=($(node_ips))
 [[ ${#IDS[@]} -gt 0 ]] || die "No running nodes for $NAME_PREFIX."
+
+# --- Data drives: what Storage Pool Drive in the cluster profile must name ------------------------
+data_drives() {  # find each node's data volume (attached as /dev/sdb) on the node; save the common name
+  local i vol out dev bytes vg first="" same=1
+  log "Data drive on each node (Storage Pool Drive in the cluster profile)"
+  for i in "${!IDS[@]}"; do
+    vol=$(none_to_empty "$(aws_q ec2 describe-instances --instance-ids "${IDS[$i]}" \
+        --query "Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName=='/dev/sdb'].Ebs.VolumeId | [0]")")
+    if [[ -z "$vol" ]]; then warn "node $((i + 1)) (${IPS[$i]}): no data volume attached as /dev/sdb"; same=0; continue; fi
+    out=$(node_ssh "$i" "$(data_drive_script "$vol")") || out=""
+    dev=""; bytes=0; vg="-"
+    read -r dev bytes vg <<<"$out" || true
+    if [[ -z "$dev" || "$dev" == none ]]; then
+      warn "node $((i + 1)) (${IPS[$i]}): couldn't find $vol on the node (is it up? see the log)"; same=0; continue
+    fi
+    ok "node $((i + 1)) (${IPS[$i]}) data drive $dev: $((bytes / 1073741824)) GB ($vol$([[ "$vg" == - ]] || echo ", volume group $vg"))"
+    first=${first:-$dev}
+    if [[ "$dev" != "$first" ]]; then same=0; fi
+  done
+  if [[ $same -eq 1 && -n "$first" ]]; then
+    ok "Storage Pool Drive for the cluster profile: $first"
+    save_output DATA_DRIVE "$first"
+  else
+    warn "The nodes' data drives differ or couldn't all be read; Storage Pool Drive takes one name for every node."
+  fi
+}
 
 # --- Local UI API: the calls Local UI's own pages make, on a node's port 5080 ------------------
 LINK_API=/v1/edge-mgmt/edgehosts/current/link
@@ -281,7 +309,11 @@ case "$CMD" in
     fi
     for i in "${!IPS[@]}"; do wait_port "$((base + i))" "${fwd_out:-$_LOG_TMP/ssm-localhost-$((base + i)).bg}"; done
     log "Linking nodes 2-${#IDS[@]} to node 1 (${IPS[0]}) through the Local UI API"
-    link_nodes "$base" "${#IPS[@]}" ;;
+    link_nodes "$base" "${#IPS[@]}"
+    data_drives ;;
+
+  disks)
+    data_drives ;;
 
   ssh)
     [[ "$ARG" =~ ^[0-9]+$ && $ARG -ge 1 && $ARG -le ${#IDS[@]} ]] || die "Node must be 1-${#IDS[@]}."
@@ -338,5 +370,5 @@ case "$CMD" in
       ssm_forward "$NLB_PRIVATE_IP" 6443 6443; wait
     fi ;;
 
-  *) sed -n '2,19p' "$0"; exit 2 ;;
+  *) sed -n '2,20p' "$0"; exit 2 ;;
 esac

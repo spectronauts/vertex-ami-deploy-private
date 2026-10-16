@@ -40,11 +40,12 @@ For just the commands, see [INSTALLCMDS.md](INSTALLCMDS.md).
 - **Open Local UI from your workstation:** forward each node's port 5080 (`./connect.sh
   localui`) and open node 1 at `https://localhost:5080`, node 2 at `https://127.0.0.1:5081`,
   node 3 at `https://[::1]:5082`.
-- **Link the nodes:** `./connect.sh link` links nodes 2 and 3 to node 1 and waits until all
-  three are Ready, Synced and Healthy (or link them in Local UI).
+- **Link the nodes:** `./connect.sh link` links nodes 2 and 3 to node 1, waits until all
+  three are Ready, Synced and Healthy, and prints each node's data drive (or link them in
+  Local UI).
 - **Create the cluster:** embedded config, OCI Pack Registry password, your **Ubuntu Pro
-  token** (Profile Config; enter it now, not after deployment), **VIP = the IP you chose**,
-  all three nodes in control-plane-pool, **Deploy Cluster**.
+  token** and **Storage Pool Drive = the data drive** (`/dev/nvme1n1` on m5; Profile Config),
+  **VIP = the IP you chose**, all three nodes in control-plane-pool, **Deploy Cluster**.
 - **Within a minute, create the internal NLB on the VIP** with TCP listeners on 443, 6443,
   30003 and 5080, target groups with **client IP preservation off** (`./deploy.sh`).
 - **Watch it come up:** 6443, then 30003, then 443 turn healthy on all nodes. If `mongo-0`
@@ -202,7 +203,7 @@ Scripted: part of `./deploy.sh`, based on `ACCESS_METHOD`.
 | Instance type | m5.2xlarge |
 | Network | Private subnet, app group, no public IP |
 | Root volume | **300 GB gp3** (at least 300) |
-| Data volume | 1 x 500 GB gp3 |
+| Data volume | 1 x 500 GB gp3, attached as `/dev/sdb` (the node sees it as `/dev/nvme1n1` on Nitro types such as m5) |
 | Instance metadata | "V1 and V2 (token optional)" |
 | User data | Below |
 
@@ -312,6 +313,15 @@ node, links that node, and waits until node 1 lists every node **Ready**, **Sync
 linked are skipped, so it is safe to run again. It opens its own forwards on local ports 15080
 and up, so `./connect.sh localui` can stay running.
 
+Last, it finds the data volume on each node and prints the name for **Storage Pool Drive**
+in Step 8 (`./connect.sh disks` does just this part):
+
+```
+  ✓ node 1 (10.0.11.56) data drive /dev/nvme1n1: 500 GB (vol-0..., volume group drbd-vg)
+  ...
+  ✓ Storage Pool Drive for the cluster profile: /dev/nvme1n1
+```
+
 **Or in Local UI:**
 
 1. Node 1 (`https://localhost:5080`): sign in with your user-data user, **Linked Edge Hosts >
@@ -340,6 +350,11 @@ In Local UI on node 1:
      optional but recommended for security and compliance; the FIPS kernel is already in
      the image. Adding it after deployment, from the cluster's configuration tab, repaves
      every node.
+   - **Storage Pool Drive (Optional)**: the data drive Step 7 printed, `/dev/nvme1n1` on
+     Nitro instance types such as m5. The default, `/dev/sdb`, is the name AWS attaches the
+     volume under; on Nitro types the node sees it as an NVMe device instead. `./deploy.sh`
+     prints the expected name too, and it is saved as `DATA_DRIVE` in
+     `outputs-<NAME_PREFIX>.txt`.
    - Leave the rest at their defaults.
 4. **Cluster Config:** VIP = `10.0.11.210` (the free IP you chose).
 5. **Node Config:** control-plane-pool > **Add Item** > all three hosts.

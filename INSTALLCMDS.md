@@ -91,11 +91,14 @@ Link nodes 2 and 3 to node 1, in Local UI or through its API:
 ./connect.sh link                 # signs in with the user and password in user-data.yaml
                                   # (LOCALUI_USER, LOCALUI_PASSWORD override; asks if hashed)
                                   # waits until node 1 shows every node Ready, Synced, Healthy
+                                  # then prints each node's data drive (Storage Pool Drive)
                                   # safe to re-run; needs curl and jq
+./connect.sh disks                # just the data drive check: Storage Pool Drive for the profile
 ```
 
-In Local UI, create the cluster with VIP = `NLB_PRIVATE_IP` and your Ubuntu Pro token, and click
-**Deploy Cluster**. Within a minute:
+In Local UI, create the cluster with VIP = `NLB_PRIVATE_IP`, your Ubuntu Pro token, and Storage
+Pool Drive = the data drive printed above (`/dev/nvme1n1` on m5), and click **Deploy Cluster**.
+Within a minute:
 
 ```bash
 ./deploy.sh                       # creates the NLB on the VIP, target groups and listeners

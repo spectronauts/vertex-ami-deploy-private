@@ -67,6 +67,14 @@ preflight() {
     fi
   fi
   ok "Root volume $ROOT_DEVICE: $ROOT_VOLUME_SIZE_GB GB"
+  local hv vcpu mib nvme
+  read -r hv vcpu mib nvme <<<"$(aws_q ec2 describe-instance-types --instance-types "$INSTANCE_TYPE" \
+      --query 'InstanceTypes[0].[Hypervisor,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB,EbsInfo.NvmeSupport]' || true)"
+  [[ -n "$vcpu" && "$vcpu" != None ]] || die "Instance type $INSTANCE_TYPE is not offered in $REGION."
+  ok "Instance type $INSTANCE_TYPE: $vcpu vCPU, $((mib / 1024)) GiB$([[ "$hv" == None ]] || echo " ($hv)")"
+  DATA_DRIVE=$(sed -n 's/^DATA_DRIVE=//p' "$OUTPUT_FILE" 2>/dev/null || true)   # as found on the nodes, if checked
+  DATA_DRIVE=${DATA_DRIVE:-$(expected_data_drive "$nvme")}
+  ok "Data drive $DATA_DRIVE: $DATA_VOLUME_SIZE_GB GB (Storage Pool Drive in the cluster profile)"
   aws_q ec2 describe-key-pairs --key-names "$KEY_NAME" >/dev/null || die "Key pair '$KEY_NAME' not found."
   ok "Key pair $KEY_NAME found"
   check_ssh_key
@@ -397,6 +405,7 @@ summary() {
     echo "NLB_ARN=$NLB_ARN"
     echo "NLB_DNS=$NLB_DNS"
     echo "VIP=$NLB_PRIVATE_IP"
+    echo "DATA_DRIVE=$DATA_DRIVE"
   } > "$OUTPUT_FILE"
   logf INFO "Wrote $OUTPUT_FILE:"
   log_file out "$OUTPUT_FILE"
@@ -406,6 +415,7 @@ summary() {
 
   Nodes (private):        $ips
   VIP for Cluster Config: $NLB_PRIVATE_IP   (the NLB's private IP)
+  Storage Pool Drive:     $DATA_DRIVE  (the data drive; ./connect.sh link confirms it on each node)
   NLB:                    $NLB_DNS
 
   Local UI in about 25-30 minutes. From your workstation:
