@@ -512,6 +512,12 @@ tenant_token() {  # sign in as the tenant admin (for settings the system admin m
   API_TOKEN=$saved
   [[ -n "$TENANT_TOKEN" ]]
 }
+refused() {  # 0 if VerteX refused the last call to this user. It says so with 401/403, or for tenant
+  # settings the system admin may not change, with HTTP 500 "The operation is not authorized with
+  # respect to this tenant".
+  [[ "$API_STATUS" == 401 || "$API_STATUS" == 403 ]] && return 0
+  [[ "$API_STATUS" == 5* ]] && grep -qi 'not authorized' <<<"$API_BODY"
+}
 tenant_apply() {  # label method path [body]: as the system admin; if VerteX says no, as the tenant admin
   if [[ "$DRY_RUN" == true ]]; then apply "$@"; return 0; fi
   if [[ -z "$AS_TENANT" ]]; then
@@ -519,22 +525,26 @@ tenant_apply() {  # label method path [body]: as the system admin; if VerteX say
   else
     API_STATUS=403
   fi
-  if [[ "$API_STATUS" == 401 || "$API_STATUS" == 403 ]] && tenant_token; then
+  if refused && tenant_token; then
     API_TOKEN=$TENANT_TOKEN
     if api "$2" "$3" "${4:-}"; then
       ok "$1 (as the tenant admin)"; APPLIED=$((APPLIED + 1)); API_TOKEN=$SYSTEM_TOKEN; AS_TENANT=1; return 0
     fi
     API_TOKEN=$SYSTEM_TOKEN
   fi
-  if [[ "$API_STATUS" == 401 || "$API_STATUS" == 403 ]]; then
-    warn "$1: needs the tenant admin. Once they have set a password, put it in TENANT_ADMIN_PASSWORD and re-run."
+  if refused; then
+    if [[ -n "${TENANT_ADMIN_PASSWORD:-}" ]]; then
+      warn "$1: needs the tenant admin, and signing in as $TENANT_ADMIN_EMAIL to $TENANT_ORG_NAME failed. Check TENANT_ADMIN_PASSWORD."
+    else
+      warn "$1: needs the tenant admin. Set TENANT_ADMIN_PASSWORD and re-run."
+    fi
     SKIPPED=$((SKIPPED + 1)); return 1
   fi
   warn "$1: not applied ($(api_error))"; FAILED=$((FAILED + 1)); return 1
 }
 tenant_get() {  # path: GET as the system admin, else as the tenant admin; 0 if either worked
   if [[ -z "$AS_TENANT" ]]; then api GET "$1" && return 0; else API_STATUS=403; fi
-  if [[ "$API_STATUS" == 401 || "$API_STATUS" == 403 ]] && tenant_token; then
+  if refused && tenant_token; then
     API_TOKEN=$TENANT_TOKEN; local rc=0; api GET "$1" || rc=1; API_TOKEN=$SYSTEM_TOKEN; return $rc
   fi
   return 1
