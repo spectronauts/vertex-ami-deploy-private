@@ -455,4 +455,4 @@ else
   ensure_nlb
 fi
 summary
-if [[ "$NO_NLB" == "true" ]]; then ready_for_next_step; else next_steps nlb; fi
+if [[ "$NO_NLB" == "true" ]]; then ready_for_next_step; else IDS=("${APP_IDS[@]}"); next_steps nlb; fi

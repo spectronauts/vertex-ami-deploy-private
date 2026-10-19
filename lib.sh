@@ -644,7 +644,8 @@ wait_local_ui() {  # IDS/IPS: one live line per node until every node's Local UI
 }
 
 next_steps() {  # nodes|linked|nlb: the steps from Local UI being up, the nodes being linked, or the NLB being created
-  local dd step=1 nodes=${#IDS[@]}
+  local dd step=1 nodes=0
+  if [[ -n "${IDS+set}" ]]; then nodes=${#IDS[@]}; fi   # IDS may be unset (deploy.sh keeps APP_IDS)
   dd=$(sed -n 's/^DATA_DRIVE=//p' "$OUTPUT_FILE" 2>/dev/null | head -1) || dd=""
   [[ $nodes -gt 0 ]] || nodes=$APP_COUNT
   echo
