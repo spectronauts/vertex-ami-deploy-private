@@ -355,6 +355,8 @@ In Local UI on node 1:
      volume under; on Nitro types the node sees it as an NVMe device instead. `./deploy.sh`
      prints the expected name too, and it is saved as `DATA_DRIVE` in
      `outputs-<NAME_PREFIX>.txt`.
+   - **Root Domain** (Management Plane): leave the VIP, or enter the name users will reach
+     VerteX at once its DNS records exist. See [DNS and certificates](DNS-AND-CERTIFICATES.md).
    - Leave the rest at their defaults.
 4. **Cluster Config:** VIP = `10.0.11.210` (the free IP you chose).
 5. **Node Config:** control-plane-pool > **Add Item** > all three hosts.
@@ -451,7 +453,7 @@ there; only the system admin block is required.
 | --- | --- |
 | System admin | First-login password change and email (a new install's admin password is `admin`) |
 | Activation | The activation key Spectro Cloud support gives you for the product ID |
-| Domain and TLS | The FQDN users reach VerteX at, and its certificate, key and CA (PEM files) |
+| Domain and TLS | The FQDN users reach VerteX at, and its certificate, key and CA (PEM files); see [DNS and certificates](DNS-AND-CERTIFICATES.md) for the records and the names the certificate must cover |
 | SMTP | Mail server for tenant activation, password resets and alerts |
 | Proxies | Outbound HTTP/HTTPS proxy; reverse proxy (Spectro Proxy) with its certificates |
 | Banners | Login banner; classification banner |
@@ -476,7 +478,8 @@ for you:
   settings, as the tenant admin where the system admin may not. Without it, it prints the
   link, and a `https://localhost:8443/...` copy for `./connect.sh console`, for the admin to
   open.
-- **DNS:** point `DOMAIN_HOST` at the VIP.
+- **DNS:** point `DOMAIN_HOST`, and `*.DOMAIN_HOST` for tenants, at the VIP
+  ([DNS and certificates](DNS-AND-CERTIFICATES.md)).
 - **OIDC:** register the redirect URI it prints with your identity provider.
 
 It is safe to run again: what is in place is kept or set to the same value. Passwords, keys

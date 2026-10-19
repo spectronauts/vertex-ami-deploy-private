@@ -25,6 +25,7 @@ needs `curl` and `jq`.
 | --- | --- |
 | `INSTALL.md` | The install guide: quick steps, then every step in full, with troubleshooting |
 | `INSTALLCMDS.md` | The guide's commands only, in order, with their options |
+| `DNS-AND-CERTIFICATES.md` | The DNS records and TLS certificate a name for VerteX needs, and where each goes |
 | `architecture.svg` | The architecture diagram shown in INSTALL.md |
 | `architecture.excalidraw` | Its editable source; open at excalidraw.com or in the VS Code Excalidraw extension |
 | `config.env.example` | Settings; copy to `config.env` |
