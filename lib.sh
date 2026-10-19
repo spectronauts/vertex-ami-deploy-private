@@ -380,7 +380,9 @@ port_open() {  # host port -> 0 if something accepts TCP connections there (bash
 # --- Live progress: in-place spinner lines in a terminal, plain lines otherwise -------------
 SPIN=('|' '/' '-' '\')
 GREEN_CHECK=$'\033[1;32m✓\033[0m'
-TERM_COLS=$( (tput cols 2>/dev/null || echo 120) | tr -dc '0-9' ); TERM_COLS=${TERM_COLS:-120}
+# The terminal's width, read from the terminal itself (tput in $(...) sees a pipe, not the terminal).
+TERM_COLS=$( { stty size </dev/tty 2>/dev/null || echo "0 ${COLUMNS:-0}"; } | awk '{print $2}' )
+if [[ ! "$TERM_COLS" =~ ^[0-9]+$ ]] || (( TERM_COLS < 20 )); then TERM_COLS=80; fi
 spin_line() {  # tick text: one in-place line with a spinner (terminals only), cut to the terminal's width
   local t=$2
   if (( ${#t} > TERM_COLS - 6 )); then t="${t:0:$((TERM_COLS - 7))}~"; fi   # a wrapped line can't be redrawn
@@ -668,7 +670,7 @@ next_steps() {  # nodes|linked|nlb: the steps from Local UI being up, the nodes 
     printf '    %d. ./deploy.sh             right after Deploy Cluster: creates the NLB on %s\n' $step "$NLB_PRIVATE_IP"
     step=$((step + 1))
   fi
-  printf '    %d. ./status.sh --watch     until 6443, then 30003, then 443 are healthy (about 30 minutes)\n' $step
+  printf '    %d. ./status.sh --watch     until 6443, then 30003, then 443 are healthy (usually 20-30 minutes)\n' $step
   step=$((step + 1))
   printf '    %d. ./connect.sh console    VerteX at https://localhost:8443/system\n' $step
   printf '       ./configure.sh          system console settings and a tenant, from system.env\n'

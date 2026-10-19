@@ -34,13 +34,21 @@ port_health() {  # target-group-arn -> "healthy total other-states"
       END {n = 0; for (k in c) printf "%s%d %s", (n++ ? ", " : ""), c[k], k}')"
 }
 
+usual_time() {  # port -> when it usually turns healthy after Deploy Cluster (measured on 3 x m5.2xlarge)
+  case "$1" in
+    6443) echo "usually about 10 min" ;;
+    30003) echo "usually 15-20 min" ;;
+    443) echo "usually 20-30 min" ;;
+  esac
+}
+
 watch_nlb() {  # one line for the NLB and one per port, redrawn until all are done
   local start=$SECONDS tick=0 n i h t rest arn="" ip="" state="" all=0 drawn=0 el
   # shellcheck disable=SC2206
   local ports=($APP_PORTS)
   local text=() done_=() tgs=() shown=() logged=()
   n=$((${#ports[@]} + 1))
-  log "Watching the NLB and target health (Ctrl-C to stop)"
+  log "Watching the NLB and target health; every port is usually healthy 20-30 minutes after Deploy Cluster (Ctrl-C to stop)"
   while :; do
     el=$(elapsed $((SECONDS - start)))
     if (( tick % 40 == 0 )); then                      # ask AWS every 10 seconds
@@ -61,6 +69,7 @@ watch_nlb() {  # one line for the NLB and one per port, redrawn until all are do
         fi
         read -r h t rest <<<"$(port_health "${tgs[$i]}")"
         text[$((i + 1))]="port ${ports[$i]}: $h/$t healthy${rest:+ ($rest)}"
+        if [[ $t -eq 0 || $h -lt $t ]] && [[ -n "$(usual_time "${ports[$i]}")" ]]; then text[$((i + 1))]+="; $(usual_time "${ports[$i]}")"; fi
         if [[ $t -gt 0 && $h -eq $t ]]; then done_[$((i + 1))]=1; else done_[$((i + 1))]=0; all=0; fi
       done
       for ((i = 0; i < n; i++)); do                    # the log gets every change, terminal or not
@@ -70,8 +79,8 @@ watch_nlb() {  # one line for the NLB and one per port, redrawn until all are do
     if [[ -t 1 ]]; then                                # redraw the lines in place
       if [[ $drawn -eq 1 ]]; then printf '\033[%dA' "$n"; fi
       for ((i = 0; i < n; i++)); do
-        if [[ ${done_[$i]} -eq 1 ]]; then printf '\r\033[K  %s %s\n' "$GREEN_CHECK" "${text[$i]}"
-        else printf '\r\033[K  %s %s  %s\n' "${SPIN[$((tick % 4))]}" "${text[$i]}" "$el"; fi
+        if [[ ${done_[$i]} -eq 1 ]]; then printf '\r\033[K  %s %s\n' "$GREEN_CHECK" "$(fit "${text[$i]}")"
+        else printf '\r\033[K  %s %s\n' "${SPIN[$((tick % 4))]}" "$(fit "${text[$i]}  $el")"; fi
       done
       drawn=1
     elif (( tick % 40 == 0 )); then                    # not a terminal: print what changed
