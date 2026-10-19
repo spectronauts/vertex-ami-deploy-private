@@ -319,8 +319,9 @@ node, links that node, and waits until node 1 lists every node **Ready**, **Sync
 linked are skipped, so it is safe to run again. It opens its own forwards on local ports 15080
 and up, so `./connect.sh localui` can stay running.
 
-Last, it finds the data volume on each node and prints the name for **Storage Pool Drive**
-in Step 8 (`./connect.sh disks` does just this part):
+Then it finds the data volume on each node and prints the name for **Storage Pool Drive**
+in Step 8 (`./connect.sh disks` does just this part), and last, the next steps from Step 8 on
+with that drive and your VIP filled in:
 
 ```
   ✓ node 1 (10.0.11.56) data drive /dev/nvme1n1: 500 GB (vol-0..., volume group drbd-vg)

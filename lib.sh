@@ -643,14 +643,14 @@ wait_local_ui() {  # IDS/IPS: one live line per node until every node's Local UI
   done
 }
 
-next_steps() {  # nodes|nlb: the steps from Local UI being up, or from the NLB being created
+next_steps() {  # nodes|linked|nlb: the steps from Local UI being up, the nodes being linked, or the NLB being created
   local dd step=1 nodes=${#IDS[@]}
   dd=$(sed -n 's/^DATA_DRIVE=//p' "$OUTPUT_FILE" 2>/dev/null | head -1) || dd=""
   [[ $nodes -gt 0 ]] || nodes=$APP_COUNT
   echo
   echo "  Next steps:"
-  if [[ "$1" == nodes ]]; then
-    if [[ $nodes -gt 1 ]]; then
+  if [[ "$1" == nodes || "$1" == linked ]]; then
+    if [[ "$1" == nodes && $nodes -gt 1 ]]; then
       printf '    %d. ./connect.sh link       link nodes 2-%d to node 1, wait until all are Ready, Synced and\n' $step "$nodes"
       printf '                               Healthy, and confirm the Storage Pool Drive on each node\n'
       step=$((step + 1))

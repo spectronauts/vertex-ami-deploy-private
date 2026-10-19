@@ -94,6 +94,7 @@ Link nodes 2 and 3 to node 1, in Local UI or through its API:
                                   # (LOCALUI_USER, LOCALUI_PASSWORD override; asks if hashed)
                                   # waits until node 1 shows every node Ready, Synced, Healthy
                                   # then prints each node's data drive (Storage Pool Drive)
+                                  # and the next steps
                                   # safe to re-run; needs curl and jq
 ./connect.sh disks                # just the data drive check: Storage Pool Drive for the profile
 ```

@@ -314,7 +314,8 @@ case "$CMD" in
     for i in "${!IPS[@]}"; do wait_port "$((base + i))" "${fwd_out:-$_LOG_TMP/ssm-localhost-$((base + i)).bg}"; done
     log "Linking nodes 2-${#IDS[@]} to node 1 (${IPS[0]}) through the Local UI API"
     link_nodes "$base" "${#IPS[@]}"
-    data_drives ;;
+    data_drives
+    next_steps linked ;;
 
   disks)
     data_drives ;;
