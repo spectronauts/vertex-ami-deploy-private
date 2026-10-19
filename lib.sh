@@ -23,7 +23,6 @@ _redact() {  # stdin -> stdout with secrets masked
     -e 's/([Aa]uthorization:[[:space:]]*)[^[:space:]]+/\1<redacted>/g' \
     -e 's/eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/<redacted-jwt>/g' \
     -e 's/(passwd:[[:space:]]*).+/\1<redacted>/' \
-    -e 's/(mongo\.key"?[[:space:]]*:[[:space:]]*)"?[A-Za-z0-9+\/=]{16,}"?/\1<redacted>/g' \
     -e 's/(aws_secret_access_key|aws_session_token)([[:space:]]*=[[:space:]]*).+/\1\2<redacted>/'
 }
 _log_where() {  # the calling function chain, without the logging helpers

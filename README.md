@@ -64,10 +64,10 @@ m5), and click **Deploy Cluster**. Right after:
 ./status.sh --watch                            # live until 6443, 30003, 443 are healthy on every node
 ```
 
-`./status.sh --watch` also watches the install on node 1 and repairs two known failures if
-they occur: no LINSTOR storage because the `piraeus-cluster` chart lost a race with
-cert-manager, and an empty MongoDB key. It changes nothing while an install is progressing
-normally; `--no-repair` turns the repairs off.
+`./status.sh --watch` also watches the install on node 1 and repairs a known failure if it
+occurs: no LINSTOR storage because the `piraeus-cluster` chart lost a race with cert-manager.
+It changes nothing while an install is progressing normally; `--no-repair` turns the repair
+off.
 
 The NLB must not exist when you enter the VIP: Local UI refuses an IP that any device
 already owns, and an NLB's IP belongs to its network interface.
@@ -108,6 +108,5 @@ elsewhere. To follow a run from another terminal: `tail -f "$(ls -t logs/*.log |
 ## Known issues
 
 See the install guide's Troubleshooting table. The ones most likely here: a node that hangs
-on its first active boot (EC2 status "impaired"; reboot it), no LINSTOR storage after the
-`piraeus-cluster` chart lost a race with cert-manager, and `mongo-0` stuck in `Init` with
-"mongo.key is empty". `./status.sh --watch` repairs the last two.
+on its first active boot (EC2 status "impaired"; reboot it), and no LINSTOR storage after the
+`piraeus-cluster` chart lost a race with cert-manager (`./status.sh --watch` repairs it).

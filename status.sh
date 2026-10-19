@@ -5,14 +5,11 @@
 #   --watch      keep checking the NLB and each port's target health: one updating line each,
 #                with the elapsed time, until the NLB is active and every port is healthy on
 #                every node (Ctrl-C to stop). It also watches the install on node 1 and repairs
-#                two known failures if they occur and persist:
-#                  storage  the piraeus-cluster chart lost a race with cert-manager, so there
-#                           are no LINSTOR storage classes (zot's volume stays Pending, 30003
-#                           never turns healthy)
-#                  mongodb  mongo.key in hubble-system/spectro-mongodb-replicaset-key is empty,
-#                           so mongo-0 waits in Init (443 never turns healthy)
-#                The install checks need SSH_KEY_FILE, kubectl and jq; each step is in the log.
-#   --no-repair  with --watch: report those two failures, but don't change anything
+#                a known failure if it occurs and persists: the piraeus-cluster chart lost a
+#                race with cert-manager, so there are no LINSTOR storage classes (zot's volume
+#                stays Pending, 30003 never turns healthy). The install check needs
+#                SSH_KEY_FILE, kubectl and jq; each step is in the log.
+#   --no-repair  with --watch: report that failure, but don't change anything
 
 set -euo pipefail
 SCRIPT_ARGS=("$@")
@@ -23,7 +20,7 @@ while [[ $# -gt 0 ]]; do
     -c) CONFIG="$2"; shift 2 ;;
     --watch) WATCH="true"; shift ;;
     --no-repair) REPAIR="false"; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -47,13 +44,11 @@ port_health() {  # target-group-arn -> "healthy total other-states"
 # --- Install checks and repairs (--watch) -------------------------------------------------------
 # kubectl reaches node 1's own API server through a forward (it answers before the NLB does),
 # with node 1's admin kubeconfig kept in the run's private scratch directory, never the log.
-# A failure is repaired only after it has lasted a while, so a normal install in progress is
-# never touched; each repair runs at most twice.
+# The failure is repaired only after it has lasted a while, so a normal install in progress is
+# never touched; the repair runs at most twice.
 IC_ON="false"; IC_KCFG=""; IC_PORT=""; IC_FWD_PID=""; IC_NEXT_CONF=0; IC_PRINTED=0
 ST_TEXT="storage: waiting for Kubernetes on node 1"; ST_OK=0; ST_SINCE=""; ST_FIXES=0; ST_FIXED_AT=""; ST_WARNED=""
-MG_TEXT="MongoDB key: waiting for Kubernetes on node 1"; MG_OK=0; MG_SINCE=""; MG_FIXES=0
 STORAGE_STUCK_AFTER=300   # seconds the storage failure must last before the repair
-MONGO_STUCK_AFTER=180     # seconds mongo.key must stay empty (the key manager sets it in ~15s)
 
 ic_say() { IC_PRINTED=1; "$@"; }   # print during the watch (the live lines restart below it)
 node1_ssh() {  # [--quiet] command: run it on node 1
@@ -95,7 +90,7 @@ ic_connect() {  # 0 once kubectl can reach node 1's API server (copies the kubec
     (umask 077; : >"$IC_KCFG")                      # private before anything is written to it
     node1_ssh --quiet 'sudo cat /etc/kubernetes/admin.conf 2>/dev/null' >"$IC_KCFG" || true
     if ! grep -q certificate-authority-data "$IC_KCFG" 2>/dev/null; then
-      : >"$IC_KCFG"; ST_TEXT="storage: waiting for Kubernetes on node 1"; MG_TEXT="MongoDB key: waiting for Kubernetes on node 1"
+      : >"$IC_KCFG"; ST_TEXT="storage: waiting for Kubernetes on node 1"
       return 1
     fi
     IC_PORT=$(free_port 16443)
@@ -114,7 +109,7 @@ ic_connect() {  # 0 once kubectl can reach node 1's API server (copies the kubec
     fi
     if ! port_wait "$IC_PORT" 30; then
       kill "$IC_FWD_PID" 2>/dev/null || true; IC_FWD_PID=""
-      ST_TEXT="storage: can't reach node 1's API server yet (retrying)"; MG_TEXT="MongoDB key: can't reach node 1's API server yet"
+      ST_TEXT="storage: can't reach node 1's API server yet (retrying)"
       return 1
     fi
   fi
@@ -190,78 +185,32 @@ ic_fix_storage() {  # unowned-satellite-configs: let Helm adopt them, re-create 
   ST_TEXT="storage: repaired just now; waiting for LINSTOR storage classes"
 }
 
-ic_mongo() {  # sets MG_TEXT and MG_OK; sets a new key if mongo.key stays empty while mongo-0 waits
-  local js len ann ready stuck
-  js=$(kc --quiet -n hubble-system get secret spectro-mongodb-replicaset-key -o json 2>/dev/null) \
-    || { MG_OK=0; MG_SINCE=""; MG_TEXT="MongoDB key: secret not created yet"; return 0; }
-  len=$(jq -r '.data["mongo.key"] // "" | length' <<<"$js")
-  ann=$(jq -r '.metadata.annotations // {} | to_entries | map(select(.key | startswith("mongodb-key"))) | map("\(.key)=\(.value)") | join(" ")' <<<"$js")
-  logf DEBUG "MongoDB key secret: mongo.key is $len base64 characters; ${ann:-no key-manager annotations}"
-  if (( len > 0 )); then
-    MG_OK=1; MG_SINCE=""; MG_TEXT="MongoDB key: set"
-    if [[ $MG_FIXES -gt 0 ]]; then MG_TEXT+=" (repaired)"; fi
-    return 0
-  fi
-  MG_OK=0
-  ready=$(kc -n hubble-system get pod mongo-0 -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null) || ready="absent"
-  MG_SINCE=${MG_SINCE:-$SECONDS}; stuck=$((SECONDS - MG_SINCE))
-  if (( stuck >= MONGO_STUCK_AFTER )) && [[ "$ready" != "true" && "$ready" != "absent" && "$REPAIR" == "true" && $MG_FIXES -lt 2 ]]; then
-    ic_fix_mongo; return 0
-  fi
-  MG_TEXT="MongoDB key: empty for $(elapsed $stuck)"
-  case "$ready" in
-    absent) MG_TEXT+=", mongo-0 not created yet" ;;
-    true)   MG_TEXT+=", but mongo-0 is ready: not changing it" ;;
-    *)      MG_TEXT+=", mongo-0 waiting"
-            if [[ "$REPAIR" != "true" ]]; then MG_TEXT+="; --no-repair: see INSTALL.md"
-            elif [[ $MG_FIXES -lt 2 ]]; then MG_TEXT+="; repair at $(elapsed $MONGO_STUCK_AFTER)"
-            else MG_TEXT+="; repaired twice already: see INSTALL.md"; fi ;;
-  esac
-}
-
-ic_fix_mongo() {  # set a new random mongo.key (756 random bytes, base64); the value never reaches the log
-  local pf len
-  MG_FIXES=$((MG_FIXES + 1))
-  ic_say log "Repairing MongoDB (attempt $MG_FIXES): mongo.key has stayed empty while mongo-0 waits in Init"
-  pf=$(mktemp "$_LOG_TMP/mongo-key.XXXXXX")
-  printf '{"stringData":{"mongo.key":"%s"}}' "$(head -c 756 /dev/urandom | base64 | tr -d '\n')" >"$pf"
-  if kc -n hubble-system patch secret spectro-mongodb-replicaset-key --type merge --patch-file "$pf" >/dev/null; then
-    len=$(kc --quiet -n hubble-system get secret spectro-mongodb-replicaset-key -o json | jq -r '.data["mongo.key"] // "" | length') || len=0
-    ic_say ok "Set a new MongoDB key ($len base64 characters); mongo-0 picks it up within a minute"
-    MG_OK=1; MG_SINCE=""; MG_TEXT="MongoDB key: set (repaired)"
-  else
-    ic_say warn "Could not set the MongoDB key (see the log); INSTALL.md Troubleshooting has the command"
-  fi
-  rm -f "$pf"
-}
-
 ic_check() {  # one round of install checks (every 30 seconds while watching)
   [[ "$IC_ON" == "true" ]] || return 0
   ic_connect || return 0
   if [[ "$(kc get --raw=/readyz 2>/dev/null)" != ok ]]; then   # not up yet, or the forward went stale
-    ST_TEXT="storage: waiting for node 1's API server"; MG_TEXT="MongoDB key: waiting for node 1's API server"
+    ST_TEXT="storage: waiting for node 1's API server"
     if [[ -n "$IC_FWD_PID" ]]; then kill "$IC_FWD_PID" 2>/dev/null || true; IC_FWD_PID=""; fi   # reopen it next round
     return 0
   fi
   ic_storage
-  ic_mongo
 }
 
-watch_nlb() {  # one line for the NLB, one per port and two for the install; redrawn until all are done
+watch_nlb() {  # one line for the NLB, one per port and one for the install; redrawn until all are done
   local start=$SECONDS tick=0 n np i h t rest arn="" ip="" state="" all=0 drawn=0 el
   # shellcheck disable=SC2206
   local ports=($APP_PORTS)
   local text=() done_=() tgs=() shown=() logged=()
   np=$((${#ports[@]} + 1)); n=$np
   ic_init
-  if [[ "$IC_ON" == "true" ]]; then n=$((np + 2)); fi
+  if [[ "$IC_ON" == "true" ]]; then n=$((np + 1)); fi
   if [[ "$IC_ON" == "true" ]]; then log "Watching the NLB, target health and the install on node 1 (Ctrl-C to stop)"
   else log "Watching the NLB and target health (Ctrl-C to stop)"; fi
   while :; do
     el=$(elapsed $((SECONDS - start)))
     if [[ "$IC_ON" == "true" ]] && (( tick % 120 == 0 )); then   # install checks every 30 seconds
       ic_check
-      text[$np]=$ST_TEXT; done_[$np]=$ST_OK; text[$((np + 1))]=$MG_TEXT; done_[$((np + 1))]=$MG_OK
+      text[$np]=$ST_TEXT; done_[$np]=$ST_OK
       if [[ $IC_PRINTED -eq 1 ]]; then IC_PRINTED=0; drawn=0; fi   # messages printed: start the lines below them
     fi
     if (( tick % 40 == 0 )); then                      # ask AWS every 10 seconds

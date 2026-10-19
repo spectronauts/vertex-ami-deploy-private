@@ -104,8 +104,8 @@ Within a minute:
 ./deploy.sh                       # creates the NLB on the VIP, target groups and listeners
 ./status.sh --watch               # live: NLB state and each port's health with elapsed time,
                                   # until all are healthy (6443, then 30003, then 443); also
-                                  # watches the install on node 1 and repairs the storage and
-                                  # MongoDB key failures (Troubleshooting) if they occur
+                                  # watches the install on node 1 and repairs the storage
+                                  # failure (Troubleshooting) if it occurs
                                   # options: -c <file>  --watch (without it: a snapshot)
                                   #          --no-repair (with --watch: report, don't change)
 ./connect.sh ssh 1                # options: ssh [N], N = node number (default 1)
@@ -204,13 +204,6 @@ kubectl annotate linstorsatelliteconfiguration custom-loader-image --overwrite \
 kubectl -n cluster-<id> delete pack piraeus-operator
 ./connect.sh ssh 1                           # then on node 1:
 sudo systemctl restart stylus-operator
-```
-
-`mongo-0` stuck in `Init:0/1` with "mongo.key is empty" (`./status.sh --watch` repairs this):
-
-```bash
-kubectl -n hubble-system patch secret spectro-mongodb-replicaset-key --type merge \
-  -p "{\"stringData\":{\"mongo.key\":\"$(openssl rand -base64 756 | tr -d '\n')\"}}"
 ```
 
 "VIP address is already assigned to a device on the network": remove the NLB, wait about a
