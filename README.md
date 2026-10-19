@@ -49,8 +49,9 @@ missing (INSTALL.md, "Before you start").
 cp config.env.example config.env               # set the six values at the top
 cp user-data.yaml.example user-data.yaml       # set the password and your SSH public key
 ./create-aws-infra.sh
-./deploy.sh --no-nlb                           # everything except the NLB
-./connect.sh localui                           # after ~25-30 min: https://localhost:5080, :5081, :5082
+./deploy.sh --no-nlb                           # everything except the NLB; waits until Local UI is up on
+                                               # every node (~25-30 min), then prints the next steps
+./connect.sh localui                           # https://localhost:5080, :5081, :5082
 ./connect.sh link                              # links nodes 2 and 3 to node 1, waits until all are ready,
                                                # prints the data drive for Storage Pool Drive
 ```

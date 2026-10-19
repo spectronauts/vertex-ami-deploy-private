@@ -426,23 +426,21 @@ summary() {
   Storage Pool Drive:     $DATA_DRIVE  (the data drive; ./connect.sh link confirms it on each node)
   NLB:                    $NLB_DNS
 
-  Local UI in about 25-30 minutes. From your workstation:
-    ./connect.sh localui        forwards every node's 5080 (node 1 -> https://localhost:5080)
-    ./connect.sh ssh 1          shell on node 1
-    ./connect.sh api            forwards the VIP's 6443 for kubectl
-    ./connect.sh console        forwards the VIP's 443: VerteX at https://localhost:8443/system
 EOF
-  if [[ "$NO_NLB" == "true" ]]; then cat <<EOF
+}
 
-  Next: link the nodes, create the cluster with VIP $NLB_PRIVATE_IP, click Deploy Cluster,
-  then run ./deploy.sh to create the NLB on that IP.
-EOF
-  else cat <<EOF
-
-  Next: ./status.sh --watch    follows the NLB and each port until every port is healthy
-EOF
+ready_for_next_step() {  # after --no-nlb: wait until Local UI answers on every node, then show the steps
+  # shellcheck disable=SC2207
+  IDS=($(node_ids)); IPS=($(node_ips))
+  local can_check=true
+  if [[ -z "$SSH_KEY_FILE" || ! -f "$SSH_KEY_FILE" ]]; then can_check=false; fi
+  if [[ "$ACCESS_METHOD" == "ssm" ]] && ! type -P session-manager-plugin >/dev/null 2>&1; then can_check=false; fi
+  if [[ "$can_check" != true ]]; then
+    warn "Can't check the nodes from here (set SSH_KEY_FILE; with ssm, install session-manager-plugin). Local UI is up about 25-30 minutes after launch; ./connect.sh wait checks."
+    next_steps nodes
+    return 0
   fi
-  echo
+  if wait_local_ui; then next_steps nodes; else echo "  Check again later with: ./connect.sh wait"; fi
 }
 
 preflight
@@ -452,9 +450,9 @@ if [[ "$ACCESS_METHOD" == "eice" ]]; then ensure_eice; else ensure_ssm; fi
 ensure_nodes
 if [[ "$ACCESS_METHOD" == "eice" ]]; then wait_eice; else wait_ssm; fi
 if [[ "$NO_NLB" == "true" ]]; then
-  NLB_ARN="(not created: --no-nlb)"; NLB_DNS="(not created yet)"
-  warn "NLB not created. Enter VIP $NLB_PRIVATE_IP in Local UI, click Deploy Cluster, then run ./deploy.sh."
+  NLB_ARN="(not created: --no-nlb)"; NLB_DNS="(not created yet: ./deploy.sh after Deploy Cluster)"
 else
   ensure_nlb
 fi
 summary
+if [[ "$NO_NLB" == "true" ]]; then ready_for_next_step; else next_steps nlb; fi

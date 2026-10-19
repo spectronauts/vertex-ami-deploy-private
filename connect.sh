@@ -7,6 +7,8 @@
 #                the user and password in USER_DATA_FILE (LOCALUI_USER, LOCALUI_PASSWORD override);
 #                then checks each node's data drive (as disks does)
 #   disks        each node's data drive: the value for Storage Pool Drive in the cluster profile
+#   wait         wait until every node's Local UI answers (25-30 minutes after launch), then show
+#                the next steps (./deploy.sh --no-nlb does this itself)
 #   ssh [N]      shell on node N (default 1) as SSH_USER
 #   console [port]  forward the VIP's 443, VerteX's system console and tenant UI, to
 #                https://localhost:<port> (default 8443): sign in at /system, or at / for a tenant
@@ -27,8 +29,8 @@ SCRIPT_ARGS=("$@")
 CMD="${1:-}"; ARG="${2:-1}"
 cd "$(dirname "$0")"
 case "$CMD" in
-  nodes|localui|link|disks|console|ssh|api|kubeconfig) LOG_NAME="connect-$CMD" ;;
-  *) sed -n '2,22p' "$0"; exit 2 ;;
+  nodes|localui|link|disks|wait|console|ssh|api|kubeconfig) LOG_NAME="connect-$CMD" ;;
+  *) sed -n '2,24p' "$0"; exit 2 ;;
 esac
 # shellcheck source=lib.sh
 source ./lib.sh
@@ -317,6 +319,10 @@ case "$CMD" in
   disks)
     data_drives ;;
 
+  wait)
+    wait_local_ui || exit 1
+    next_steps nodes ;;
+
   ssh)
     [[ "$ARG" =~ ^[0-9]+$ && $ARG -ge 1 && $ARG -le ${#IDS[@]} ]] || die "Node must be 1-${#IDS[@]}."
     n=$((ARG - 1))
@@ -418,5 +424,5 @@ case "$CMD" in
       ssm_forward "$NLB_PRIVATE_IP" 6443 6443; wait
     fi ;;
 
-  *) sed -n '2,22p' "$0"; exit 2 ;;
+  *) sed -n '2,24p' "$0"; exit 2 ;;
 esac

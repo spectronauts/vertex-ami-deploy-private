@@ -274,6 +274,12 @@ Observed timing (2026-10-09):
 | 4-25 min | Airgap content is read and unpacked (the wait is mostly EBS: first-read fetches from S3, writes capped at 125 MiB/s on default gp3) |
 | ~25-30 min | Local UI answers on 5080 |
 
+`./deploy.sh --no-nlb` waits for this itself. After its summary it shows one line per node,
+with EC2's status checks, until every node's Local UI answers, then prints the next steps with
+your VIP and Storage Pool Drive filled in. Ctrl-C stops the waiting, not the nodes;
+`./connect.sh wait` picks it up again. It checks through node 1, so it needs `SSH_KEY_FILE`
+(and `session-manager-plugin` with `ACCESS_METHOD=ssm`).
+
 Then forward Local UI to your workstation:
 
 ```

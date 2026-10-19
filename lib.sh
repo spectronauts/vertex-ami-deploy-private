@@ -505,15 +505,10 @@ free_port() { local p=$1; while port_open localhost "$p"; do p=$((p + 1)); done;
 port_wait() { local i; for ((i = 0; i < $2; i++)); do port_open localhost "$1" && return 0; sleep 1; done; return 1; }  # port seconds
 
 NODE_SSH_PORTS=()   # ssm: local port forwarded to each node's port 22
-node_ssh() {  # [--quiet] index command: run command on node index+1 (IDS/IPS) as SSH_USER, never prompting
-  # stdout is returned; the command, exit code, time, output (unless --quiet) and errors are logged.
-  local quiet="" rc=0 outf errf t0 n
-  if [[ "$1" == --quiet ]]; then quiet=1; shift; fi
-  n=$1; shift
-  outf=$(mktemp "$_LOG_TMP/ssh.XXXXXX"); errf="$outf.err"; t0=$(_clock)
+node_ssh_ready() {  # index: set up what node_ssh needs (ssh options; with ssm, the forward to port 22)
+  local n=$1
   if [[ "$ACCESS_METHOD" == "eice" ]]; then
     if [[ -z "${EICE_OPTS+set}" ]]; then eice_opts; fi
-    ssh "${EICE_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=30 "$SSH_USER@${IDS[$n]}" "$1" >"$outf" 2>"$errf" || rc=$?
   else
     need_key
     if [[ -z "${NODE_SSH_PORTS[$n]:-}" ]] || ! port_open localhost "${NODE_SSH_PORTS[$n]}"; then
@@ -521,6 +516,18 @@ node_ssh() {  # [--quiet] index command: run command on node index+1 (IDS/IPS) a
       NODE_SSH_PORTS[$n]=$(free_port $((12222 + n)))
       ssm_forward "${IPS[$n]}" 22 "${NODE_SSH_PORTS[$n]}"; port_wait "${NODE_SSH_PORTS[$n]}" 30 || true
     fi
+  fi
+}
+node_ssh() {  # [--quiet] index command: run command on node index+1 (IDS/IPS) as SSH_USER, never prompting
+  # stdout is returned; the command, exit code, time, output (unless --quiet) and errors are logged.
+  local quiet="" rc=0 outf errf t0 n
+  if [[ "$1" == --quiet ]]; then quiet=1; shift; fi
+  n=$1; shift
+  outf=$(mktemp "$_LOG_TMP/ssh.XXXXXX"); errf="$outf.err"; t0=$(_clock)
+  node_ssh_ready "$n"
+  if [[ "$ACCESS_METHOD" == "eice" ]]; then
+    ssh "${EICE_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=30 "$SSH_USER@${IDS[$n]}" "$1" >"$outf" 2>"$errf" || rc=$?
+  else
     ssh -i "$SSH_KEY_FILE" -p "${NODE_SSH_PORTS[$n]}" -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null "$SSH_USER@localhost" "$1" >"$outf" 2>"$errf" || rc=$?
   fi
@@ -558,4 +565,111 @@ save_output() {  # key value: set key=value in this deployment's outputs file
   { if [[ -f "$OUTPUT_FILE" ]]; then grep -v "^$1=" "$OUTPUT_FILE" || true; fi; echo "$1=$2"; } >"$tmp"
   cat "$tmp" >"$OUTPUT_FILE"; rm -f "$tmp"
   logf INFO "$OUTPUT_FILE: $1=$2"
+}
+
+# --- Ready for the next step: Local UI on every node (about 25-30 minutes after launch) ----------
+localui_probe_script() {  # node-ip...: a script for node 1 that prints "<ip> <http-code|open|closed>"
+  cat <<EOF
+for ip in $*; do
+  c=""
+  if command -v curl >/dev/null 2>&1; then c=\$(curl -sk -m 5 -o /dev/null -w '%{http_code}' "https://\$ip:5080/" 2>/dev/null); fi
+  if [ -z "\$c" ] || [ "\$c" = 000 ]; then
+    if timeout 5 bash -c "</dev/tcp/\$ip/5080" 2>/dev/null; then c=open; else c=closed; fi
+  fi
+  echo "\$ip \$c"
+done
+EOF
+}
+fit() { local t=$1; if (( ${#t} > TERM_COLS - 6 )); then t="${t:0:$((TERM_COLS - 7))}~"; fi; printf '%s' "$t"; }
+wait_local_ui() {  # IDS/IPS: one live line per node until every node's Local UI answers twice in a row
+  local n=${#IDS[@]} i tick=0 start=$SECONDS el drawn=0 all rounds=0 job="" out code st why
+  local text=() ready=() logged=()
+  [[ $n -gt 0 ]] || die "No running nodes for $NAME_PREFIX."
+  KILL_JOBS_ON_EXIT=true   # the background probe stops with the script (Ctrl-C included)
+  node_ssh_ready 0
+  log "Waiting for Local UI on every node (about 25-30 minutes after launch; Ctrl-C stops waiting, not the nodes)"
+  for ((i = 0; i < n; i++)); do text[$i]="node $((i + 1)) (${IPS[$i]}): checking"; ready[$i]=0; done
+  out="$_LOG_TMP/localui-probe"
+  while :; do
+    el=$(elapsed $((SECONDS - start)))
+    # Every 20 seconds, in the background so the lines keep moving: EC2's status checks, and from
+    # node 1 a request to each node's Local UI (port 5080).
+    if [[ -z "$job" ]] && (( tick % 80 == 0 )); then
+      node_ssh_ready 0
+      ( aws_q ec2 describe-instance-status --include-all-instances --instance-ids "${IDS[@]}" \
+          --query 'InstanceStatuses[].[InstanceId,InstanceState.Name,InstanceStatus.Status]' >"$out.ec2" 2>/dev/null || true
+        node_ssh 0 "$(localui_probe_script "${IPS[@]}")" >"$out.ui" 2>/dev/null || true
+        : >"$out.done" ) &
+      job=$!
+    fi
+    if [[ -n "$job" && -f "$out.done" ]]; then
+      wait "$job" 2>/dev/null || true; job=""; rm -f "$out.done"
+      all=1
+      for ((i = 0; i < n; i++)); do
+        code=$(awk -v ip="${IPS[$i]}" '$1 == ip {print $2}' "$out.ui")
+        st=$(awk -v id="${IDS[$i]}" '$1 == id {print ($2 == "running" ? "EC2 checks " $3 : "EC2 " $2)}' "$out.ec2")
+        if [[ "$code" =~ ^[1-5][0-9][0-9]$ || "$code" == open ]]; then
+          ready[$i]=1; text[$i]="node $((i + 1)) (${IPS[$i]}): Local UI answering"
+        else
+          ready[$i]=0; all=0
+          if [[ ! -s "$out.ui" ]]; then why="starting; node 1 doesn't accept ssh yet"; else why="starting; Local UI not answering yet"; fi
+          text[$i]="node $((i + 1)) (${IPS[$i]}): $why${st:+, $st}"
+          if [[ "$st" == *impaired* ]]; then   # the known first-boot hang: a reboot fixes it
+            text[$i]="node $((i + 1)) (${IPS[$i]}, ${IDS[$i]}): EC2 checks impaired; reboot it if this lasts"
+            logf WARN "${IDS[$i]} impaired; if it lasts: aws ec2 reboot-instances --instance-ids ${IDS[$i]}"
+          fi
+        fi
+        if [[ "${logged[$i]:-}" != "${text[$i]}" ]]; then
+          logf INFO "${text[$i]} (after $el)"; logged[$i]=${text[$i]}
+          if [[ ! -t 1 ]]; then echo "  $el  ${text[$i]}"; fi
+        fi
+      done
+      if [[ $all -eq 1 ]]; then rounds=$((rounds + 1)); else rounds=0; fi
+    fi
+    if [[ -t 1 ]]; then                                  # redraw the lines in place
+      if [[ $drawn -eq 1 ]]; then printf '\033[%dA' "$n"; fi
+      for ((i = 0; i < n; i++)); do
+        if [[ ${ready[$i]} -eq 1 ]]; then printf '\r\033[K  %s %s\n' "$GREEN_CHECK" "$(fit "${text[$i]}")"
+        else printf '\r\033[K  %s %s\n' "${SPIN[$((tick % 4))]}" "$(fit "${text[$i]}  $el")"; fi
+      done
+      drawn=1
+    fi
+    if (( rounds >= 2 )); then ok "Local UI is up on all $n node(s) ($el)"; return 0; fi
+    if (( SECONDS - start > 3600 )); then
+      warn "Local UI is not up on every node after an hour. INSTALL.md Troubleshooting covers nodes that stay in recovery or impaired."
+      return 1
+    fi
+    sleep 0.25; tick=$((tick + 1))
+  done
+}
+
+next_steps() {  # nodes|nlb: the steps from Local UI being up, or from the NLB being created
+  local dd step=1 nodes=${#IDS[@]}
+  dd=$(sed -n 's/^DATA_DRIVE=//p' "$OUTPUT_FILE" 2>/dev/null | head -1) || dd=""
+  [[ $nodes -gt 0 ]] || nodes=$APP_COUNT
+  echo
+  echo "  Next steps:"
+  if [[ "$1" == nodes ]]; then
+    if [[ $nodes -gt 1 ]]; then
+      printf '    %d. ./connect.sh link       link nodes 2-%d to node 1, wait until all are Ready, Synced and\n' $step "$nodes"
+      printf '                               Healthy, and confirm the Storage Pool Drive on each node\n'
+      step=$((step + 1))
+    fi
+    printf '    %d. ./connect.sh localui    then in Local UI on node 1, https://localhost:5080 (your user-data\n' $step
+    printf '                               user): Cluster > Create cluster\n'
+    printf '                                 Profile Config  OCI Pack Registry Password; Ubuntu Pro Token;\n'
+    printf '                                                 Storage Pool Drive %s; Root Domain: keep the\n' "${dd:-/dev/nvme1n1}"
+    printf '                                                 VIP, or your FQDN (DNS-AND-CERTIFICATES.md)\n'
+    printf '                                 Cluster Config  VIP %s\n' "$NLB_PRIVATE_IP"
+    printf '                                 Node Config     all %d node(s) in control-plane-pool\n' "$nodes"
+    printf '                               and click Deploy Cluster\n'
+    step=$((step + 1))
+    printf '    %d. ./deploy.sh             right after Deploy Cluster: creates the NLB on %s\n' $step "$NLB_PRIVATE_IP"
+    step=$((step + 1))
+  fi
+  printf '    %d. ./status.sh --watch     until 6443, then 30003, then 443 are healthy (about 30 minutes)\n' $step
+  step=$((step + 1))
+  printf '    %d. ./connect.sh console    VerteX at https://localhost:8443/system\n' $step
+  printf '       ./configure.sh          system console settings and a tenant, from system.env\n'
+  echo
 }

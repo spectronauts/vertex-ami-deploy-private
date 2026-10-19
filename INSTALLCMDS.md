@@ -68,6 +68,8 @@ aws ec2 create-instance-connect-endpoint --subnet-id <private-subnet-id> \
 ## 6. Wait for Local UI (25-30 minutes), then forward it
 
 ```bash
+./connect.sh wait                 # one line per node until every Local UI answers, then the
+                                  # next steps (./deploy.sh --no-nlb runs this itself)
 ./connect.sh nodes                # node number, instance ID and private IP
 ./connect.sh localui              # node 1 https://localhost:5080
                                   # node 2 https://127.0.0.1:5081
