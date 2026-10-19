@@ -439,8 +439,7 @@ EOF
 EOF
   else cat <<EOF
 
-  Next: ./status.sh --watch    follows the NLB, each port and the install on node 1 until
-                               every port is healthy; repairs a known install failure
+  Next: ./status.sh --watch    follows the NLB and each port until every port is healthy
 EOF
   fi
   echo

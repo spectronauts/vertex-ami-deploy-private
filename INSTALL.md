@@ -390,18 +390,7 @@ then clear. `./deploy.sh` shows the NLB's state and elapsed time while it provis
 ```
 
 It shows the NLB state and each port's target health live, with the elapsed time, until every
-port is healthy on every node (`./status.sh` alone prints a snapshot). It also watches the
-install on node 1 through node 1's Kubernetes API, and repairs a known install failure if it
-occurs (Troubleshooting has it):
-
-| Failure | Repaired when | Repair |
-| --- | --- | --- |
-| Storage: no LINSTOR storage classes, because the `piraeus-cluster` chart lost a race with cert-manager | It has lasted 5 minutes | Hand `custom-loader-image` to the chart's Helm release, delete the `piraeus-operator` pack record (re-created automatically), restart `stylus-operator` on node 1 |
-
-A normal install in progress is never changed, and the repair runs at most twice. The check
-needs `SSH_KEY_FILE`, `kubectl` and `jq`. Each step is in the run log, and the changed
-objects are backed up next to it first. `--no-repair` reports the failure without changing
-anything.
+port is healthy on every node (`./status.sh` alone prints a snapshot).
 
 ---
 
@@ -510,27 +499,12 @@ and tokens never reach the run log.
 | "VIP address is already assigned to a device on the network" | The NLB (or its interface, about a minute after deletion) owns the IP | `./teardown.sh --nlb-only`, wait, create the cluster, then `./deploy.sh` |
 | `dial tcp <VIP>:6443: no route to host` | NLB not created yet | `./deploy.sh` |
 | Node connections to the VIP hang | Client IP preservation on | `preserve_client_ip.enabled=false` on the target groups |
-| `zot-pvc` Pending, 30003 never healthy; no `linstor-*` storage classes; `stylus-operator` logs `invalid ownership metadata` for `LinstorSatelliteConfiguration "custom-loader-image"` | The `piraeus-cluster` chart was installed before cert-manager was ready and failed; the satellite configuration was then created outside Helm, every retry failed on it, and the retries stopped | `./status.sh --watch` repairs it; or by hand (below) |
 | A pod on one node stuck in `ImagePullBackOff` pulling from `us-docker.pkg.dev` (for example `mongo-2`, or a `spectro-task` plan job) while other nodes run the same image | Kubelet garbage-collected preloaded images on that node (root volume too small); the node can't pull them back | Redeploy with root volumes of at least 300 GB (Step 5) |
 
 **Logs.** Each script run writes a log in `logs/` and prints its path when it starts, and
 again if it fails. The log records every AWS call with its full error, every Local UI API
 call, and the command that stopped the run. Passwords and tokens appear as `<redacted>`.
 Start there when a step fails, and include the log when you ask for help.
-
-**Repair storage by hand:** let the chart's Helm release adopt the satellite configuration,
-delete the pack record so it is re-created, then restart `stylus-operator` on node 1. The pack
-record is in the `cluster-<id>` namespace (`kubectl get packs -A | grep piraeus`).
-
-```
-kubectl label linstorsatelliteconfiguration custom-loader-image app.kubernetes.io/managed-by=Helm --overwrite
-kubectl annotate linstorsatelliteconfiguration custom-loader-image --overwrite \
-  meta.helm.sh/release-name=piraeusoperator-piraeus-cluster meta.helm.sh/release-namespace=piraeus-system
-kubectl -n cluster-<id> delete pack piraeus-operator
-./connect.sh ssh 1        # then: sudo systemctl restart stylus-operator
-```
-
-The `linstor-*` storage classes appear within a few minutes, then `zot-pvc` binds.
 
 ---
 
