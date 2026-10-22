@@ -1,0 +1,81 @@
+# ================================================================================================
+#  Terraform settings for the VerteX appliance on AWS, private subnets only
+#
+#  Copy this file to terraform.tfvars and set the values under REQUIRED. Everything under
+#  OPTIONAL already has a working value. These are the same settings as ../config.env.example.
+# ================================================================================================
+
+
+# ------------------------------------------------------------------------------------------------
+#  REQUIRED
+# ------------------------------------------------------------------------------------------------
+
+# AWS region to deploy in.
+region = "us-gov-west-1"
+
+# Prefix for every resource's name and tag; unique per deployment (up to 20 letters, digits, -).
+name_prefix = "vxp"
+
+# The VerteX appliance AMI in the region.
+ami_id = ""
+
+# EC2 key pair; the AMI installs it for the kairos user.
+key_name = ""
+
+# key_name's private key (.pem). Terraform doesn't use it; it goes into the config_env output for
+# ../connect.sh and ../status.sh. ~ is fine.
+ssh_key_file = ""
+
+# The cluster VIP: a free address in private_cidr. Enter it in Local UI before the NLB exists.
+nlb_private_ip = "10.0.11.210"
+
+# Create the NLB on the VIP. Leave false for the first apply; set true right after you click
+# Deploy Cluster in Local UI (it refuses a VIP that a device owns), then apply again.
+create_nlb = false
+
+
+# ------------------------------------------------------------------------------------------------
+#  OPTIONAL: nodes
+# ------------------------------------------------------------------------------------------------
+
+# Number of nodes: 3 for a cluster, 1 for a single node.
+app_count = 3
+
+# Node instance type (8 vCPU, 32 GiB).
+instance_type = "m5.2xlarge"
+
+# Root volume in GB; at least 300 (INSTALL.md Step 5).
+root_volume_size_gb = 300
+
+# Data volume in GB; the AMI builds its storage pool on it.
+data_volume_size_gb = 500
+
+# Node user data, relative to this folder: copy ../user-data.yaml.example to ../user-data.yaml,
+# then set the password and your SSH public key.
+user_data_file = "../user-data.yaml"
+
+
+# ------------------------------------------------------------------------------------------------
+#  OPTIONAL: network
+# ------------------------------------------------------------------------------------------------
+
+# Availability zone; empty picks the first zone that offers instance_type.
+az = ""
+
+# VPC address range.
+vpc_cidr = "10.0.0.0/16"
+
+# The only subnet: nodes, NLB and access endpoint.
+private_cidr = "10.0.11.0/24"
+
+
+# ------------------------------------------------------------------------------------------------
+#  OPTIONAL: access
+# ------------------------------------------------------------------------------------------------
+
+# eice: EC2 Instance Connect Endpoint (no hourly cost). ssm: jump host and SSM endpoints (billed
+# hourly; needs session-manager-plugin on your workstation).
+access_method = "eice"
+
+# Jump host instance type (access_method = "ssm" only).
+jump_instance_type = "t3.micro"

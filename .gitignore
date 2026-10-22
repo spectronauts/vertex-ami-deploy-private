@@ -21,3 +21,11 @@ bug-*.md
 
 # Certificates and keys for system.env (TLS, reverse proxy, identity providers).
 certs/
+
+# Terraform: settings, state and provider cache (the lock file is kept).
+terraform/terraform.tfvars
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/crash.log
